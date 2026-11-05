@@ -1,6 +1,8 @@
 import { expect, test } from 'vitest';
 import { errorLine, firstSentence, lastQuestion, oneLine } from '../src/text';
 
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
 test('oneLine strips color codes and turns control characters into spaces', () => {
   expect(oneLine('a\x1b[31mred\x1b[0m\nnext\tline', 80)).toBe('ared next line');
 });
@@ -31,6 +33,24 @@ test('oneLine strips the other escape forms', () => {
   expect(oneLine('a\x1b\nb', 80)).toBe('a b');
 });
 
+test('oneLine treats C1 control characters like other control characters', () => {
+  // U+009B is the 8-bit form of CSI
+  expect(oneLine('a\u009b2Jb', 80)).toBe('a 2Jb');
+  // both ends of U+0080-U+009F, and NEL
+  expect(oneLine('a\u0080b\u009fc\u0085d', 80)).toBe('a b c d');
+  // ordinary non-ASCII text is kept
+  expect(oneLine('café ¡hola! …', 80)).toBe('café ¡hola! …');
+});
+
+test('oneLine removes charset designations as one sequence', () => {
+  // ESC ( B is what tput sgr0 prints before the reset
+  expect(oneLine('red\x1b(B\x1b[m text', 80)).toBe('red text');
+  // all seven designators
+  for (const designator of '()*+-./') {
+    expect(oneLine(`a\x1b${designator}Bb`, 80)).toBe('ab');
+  }
+});
+
 test('oneLine collapses whitespace and trims', () => {
   expect(oneLine('  a \n\n  b\t\tc  ', 80)).toBe('a b c');
 });
@@ -38,6 +58,22 @@ test('oneLine collapses whitespace and trims', () => {
 test('oneLine measures max on the cleaned text', () => {
   expect(oneLine('x'.repeat(10), 10)).toBe('xxxxxxxxxx');
   expect(oneLine('\x1b[31m' + 'x'.repeat(10) + '\x1b[0m', 10)).toBe('xxxxxxxxxx');
+});
+
+test('oneLine cuts by code points and never splits a surrogate pair', () => {
+  expect(oneLine('😀'.repeat(10), 4)).toBe('😀😀😀…');
+  expect(oneLine('a😀b😀c', 3)).toBe('a😀…');
+  // exactly max code points is kept whole, one more is cut
+  expect(oneLine('😀'.repeat(4), 4)).toBe('😀😀😀😀');
+  expect(oneLine('😀'.repeat(5), 4)).toBe('😀😀😀…');
+  expect(oneLine('x'.repeat(11), 10)).toBe('xxxxxxxxx…');
+  // no lone surrogate at any cut position
+  for (let max = 1; max <= 12; max++) {
+    expect(oneLine('a😀b😀c😀d😀e😀', max)).not.toMatch(LONE_SURROGATE);
+  }
+  // an escape followed by an astral character takes the whole character
+  expect(oneLine('a\x1b😀b', 80)).toBe('ab');
+  expect(oneLine('a\x1b(😀b', 80)).toBe('ab');
 });
 
 test('firstSentence drops bold markers before cutting', () => {
@@ -59,9 +95,22 @@ test('firstSentence strips markdown markers', () => {
   expect(firstSentence('# Fixed the bug. Added a test.')).toBe('Fixed the bug.');
   expect(firstSentence('- Fixed the bug. Added a test.')).toBe('Fixed the bug.');
   expect(firstSentence('* Fixed the bug! Added a test.')).toBe('Fixed the bug!');
+  expect(firstSentence('## Fixed the bug. Added a test.')).toBe('Fixed the bug.');
   expect(firstSentence('__Done__: wrote `cart.ts`. More')).toBe('Done: wrote cart.ts.');
   expect(firstSentence('')).toBe('');
   expect(firstSentence('**')).toBe('');
+});
+
+test('firstSentence and lastQuestion strip a leading numbered-list marker', () => {
+  expect(firstSentence('1. Fixed the bug. 2. Added tests.')).toBe('Fixed the bug.');
+  expect(firstSentence('2) Fixed the bug. Added tests.')).toBe('Fixed the bug.');
+  expect(firstSentence('10. Fixed the bug. Added tests.')).toBe('Fixed the bug.');
+  expect(lastQuestion('1) Should I continue?')).toBe('Should I continue?');
+  // after a bullet or leading whitespace
+  expect(firstSentence('- 1. Fixed the bug. Added tests.')).toBe('Fixed the bug.');
+  expect(firstSentence('\n\n  1. Fixed the bug. Added tests.')).toBe('Fixed the bug.');
+  // a decimal number is not a marker
+  expect(firstSentence('2.5 is the new version. Next')).toBe('2.5 is the new version.');
 });
 
 test('firstSentence applies oneLine with its own max, 70 by default', () => {

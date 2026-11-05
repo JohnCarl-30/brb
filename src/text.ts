@@ -1,12 +1,17 @@
 // Escape sequences, matched in this order at each ESC:
 //   ESC ] ... (BEL | ESC \)   OSC: window titles, hyperlinks
 //   ESC [ ... final byte      CSI: colors, cursor movement, erasing
+//   ESC ( x                   charset designation (also ESC ) * + - . / x), e.g. ESC ( B from tput sgr0
 //   ESC x                     any other two-character escape
-const ESCAPE = /\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[[0-?]*[ -\/]*[@-~]|.)/g;
-// What the escapes leave behind: control characters and whitespace become one space.
-const CONTROL_OR_SPACE = /[\x00-\x1f\x7f\s]+/g;
+// The u flag makes `.` take a whole code point, so removing an escape never leaves half a surrogate pair.
+const ESCAPE = /\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[[0-?]*[ -\/]*[@-~]|[()*+\-.\/].|.)/gu;
+// What the escapes leave behind: control characters (C0, DEL and C1) and whitespace become one space.
+const CONTROL_OR_SPACE = /[\x00-\x1f\x7f-\x9f\s]+/g;
 const MARKDOWN_MARKS = /\*\*|__|`/g;
-const LEADING_MARKERS = /^[\s#*-]+/;
+// Heading and bullet markers at the start of the text ("# ", "- ", "* "), then one numbered-list
+// marker ("1. ", "2) "). The marker is not inside a repeated group, so a huge run of them can't
+// overflow the regex stack.
+const LEADING_MARKERS = /^[\s#*-]*(?:\d+[.)]\s+)?/;
 // A sentence ends at a ., ! or ? that is followed by whitespace or the end of the text.
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 const PROBLEM_WORDS = /error|fail|unknown|cannot|not found/i;
@@ -21,7 +26,15 @@ function sentences(text: string): string[] {
 
 export function oneLine(text: string, max: number): string {
   const line = clean(text);
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+  // Count code points rather than UTF-16 units, so the cut never splits a surrogate pair.
+  let cutAt = 0; // UTF-16 length of the first max - 1 code points
+  let seen = 0;
+  for (const char of line) {
+    if (seen === max) return `${line.slice(0, cutAt)}…`;
+    if (seen < max - 1) cutAt += char.length;
+    seen++;
+  }
+  return line;
 }
 
 export function firstSentence(text: string, max = 70): string {
