@@ -1,0 +1,40 @@
+{
+  "name": "brb",
+  "version": "0.1.0",
+  "description": "Step away from your AI coding sessions. When you're back, brb shows you everything that moved in one screen.",
+  "type": "module",
+  "bin": {
+    "brb": "dist/brb.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "repository": "github:JohnCarl-30/brb",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "gemini-cli",
+    "ai-agents",
+    "cli",
+    "context-switching"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "bench": "vitest run --config vitest.bench.config.ts",
+    "typecheck": "tsc --noEmit",
+    "demo:seed": "tsx demo/seed.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "picocolors": "^1.1.1",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}
