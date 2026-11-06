@@ -1,0 +1,8 @@
+{
+  "name": "brb",
+  "description": "Catch up on every AI coding session when you're back.",
+  "owner": { "name": "JohnCarl-30" },
+  "plugins": [
+    { "name": "brb", "source": "./", "description": "Catch up on every AI coding session when you're back." }
+  ]
+}
