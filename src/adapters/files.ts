@@ -7,6 +7,10 @@ export const SCAN_MS = 7 * 86_400_000;
 // A session file is read as its first HEAD_BYTES and last TAIL_BYTES, so the cost never grows with a long history.
 export const HEAD_BYTES = 16_384;
 export const TAIL_BYTES = 65_536;
+// A session's title is cut to this many characters.
+export const TITLE_MAX = 60;
+// errorLine is linear in the output and classify only reads its end, so a huge build log is never kept whole.
+export const OUTPUT_KEEP_CHARS = 4_000;
 
 export interface RecentFile { path: string; mtimeMs: number }
 
@@ -99,6 +103,9 @@ export async function readText(path: string): Promise<string | null> {
     throw error;
   }
 }
+
+// The value when it is a non-empty string, else undefined: a field that is missing, empty or of another type is one case.
+export const str = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
 
 // The JSON objects among the lines. A line that doesn't parse (a fragment, or one still being written) or
 // that isn't an object is dropped, so a reader never has to guard against a null or a number.

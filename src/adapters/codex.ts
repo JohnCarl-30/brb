@@ -1,13 +1,10 @@
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { oneLine } from '../text';
 import type { Session, SessionEvent } from '../types';
-import { isSummaryCwd, parseJsonLines, readText, recentFiles } from './files';
+import { OUTPUT_KEEP_CHARS, TITLE_MAX, isSummaryCwd, parseJsonLines, readText, recentFiles, str } from './files';
 import type { RecentFile } from './files';
 
-const TITLE_MAX = 60;
 const ERROR_MAX = 200;
-// errorLine is linear in the output and classify only reads its end, so a huge build log is never kept whole.
-const OUTPUT_KEEP_CHARS = 4_000;
 // A rollout is named rollout-<time>-<session id>.jsonl, and the id is a UUID.
 const ID_IN_FILE_NAME = /([0-9a-f-]{36})\.jsonl$/;
 // The kinds of item_completed that become events here. Items of other kinds (Plan, ...) don't count as the file saying
@@ -28,7 +25,6 @@ interface Transcript {
   begun: Map<string, unknown>;
 }
 
-const str = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
 const isRecord = (value: unknown): value is Record<string, any> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isReadItem = (line: any): boolean => line.type === 'event_msg' && line.payload?.type === 'item_completed' && READ_ITEMS.has(line.payload.item?.type);
 

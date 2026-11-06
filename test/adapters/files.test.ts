@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'vitest';
-import { HEAD_BYTES, SCAN_MS, TAIL_BYTES, isMissing, isSummaryCwd, parseJsonLines, readHeadTail, readText, recentFiles } from '../../src/adapters/files';
+import { HEAD_BYTES, OUTPUT_KEEP_CHARS, SCAN_MS, TAIL_BYTES, TITLE_MAX, isMissing, isSummaryCwd, parseJsonLines, readHeadTail, readText, recentFiles, str } from '../../src/adapters/files';
 
 let dir: string;
 beforeEach(() => {
@@ -14,6 +14,10 @@ afterEach(() => {
 
 test('the scan window is 7 days and the read windows are 16 KiB and 64 KiB', () => {
   expect([SCAN_MS, HEAD_BYTES, TAIL_BYTES]).toEqual([604_800_000, 16_384, 65_536]);
+});
+
+test('every adapter cuts a title at 60 characters and keeps the last 4,000 characters of a command output', () => {
+  expect([TITLE_MAX, OUTPUT_KEEP_CHARS]).toEqual([60, 4_000]);
 });
 
 // recentFiles
@@ -149,6 +153,14 @@ test('isMissing is true only for a "no such file" error', () => {
   expect(isMissing(failure('EACCES'))).toBe(false);
   expect(isMissing(failure('ENOTDIR'))).toBe(false);
   expect([new Error('plain'), null, undefined, 'ENOENT', { code: 'ENOENT' }.code].map(isMissing)).toEqual([false, false, false, false, false]);
+});
+
+// str
+
+test('str gives a string that has characters in it, and undefined for anything else', () => {
+  expect(str('main')).toBe('main');
+  expect(str(' ')).toBe(' '); // only empty counts as nothing; what blank means is up to the caller
+  expect([str(''), str(7), str(null), str(undefined), str(['a']), str({ a: 'a' }), str(true)]).toEqual(Array(7).fill(undefined));
 });
 
 // parseJsonLines

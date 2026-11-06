@@ -1,12 +1,9 @@
 import { basename, join } from 'node:path';
 import { oneLine } from '../text';
 import type { Session, SessionEvent } from '../types';
-import { isSummaryCwd, parseJsonLines, readHeadTail, recentFiles } from './files';
+import { OUTPUT_KEEP_CHARS, TITLE_MAX, isSummaryCwd, parseJsonLines, readHeadTail, recentFiles, str } from './files';
 import type { RecentFile } from './files';
 
-const TITLE_MAX = 60;
-// errorLine is linear in the output and classify only reads its end, so a huge build log is never kept whole.
-const OUTPUT_KEEP_CHARS = 4_000;
 const INTERRUPT_PREFIX = '[Request interrupted by user';
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const ASK_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
@@ -30,8 +27,6 @@ interface Transcript {
   aiTitle?: string;
   humanPromptInTail: boolean;
 }
-
-const str = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
 
 // A string as it is, or the text blocks joined with newlines. Other blocks (images, tool results) add nothing.
 function textOf(content: unknown): string {
