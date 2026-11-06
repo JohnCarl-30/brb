@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import pc from 'picocolors';
@@ -33,8 +34,11 @@ brb reads your local Claude Code, Codex and Gemini CLI history. No API key.
 // `runner`, `which` and `tmpDir` let tests stand in for the AI tools and keep off the real tmp folder; `stdin` is for `brb hook`.
 export interface RunOptions { argv: string[]; env: NodeJS.ProcessEnv; cwd: string; now: number; isTTY: boolean; columns?: number; stdin?: string; runner?: Runner; which?: (bin: string) => boolean; tmpDir?: string }
 // `pending` is the one line to show while `rerender` works; it is only there when `rerender` is. `exec` is a shell
-// command to hand the terminal to once stdout is written.
-export interface RunResult { stdout: string; exitCode: number; rerender?: () => Promise<string | null>; pending?: string; exec?: string }
+// command to hand the terminal to once stdout is written. `choices` are the numbered rows' resume commands, in order,
+// for the "pick a session" question asked at the end in a terminal.
+export interface RunResult {
+  stdout: string; exitCode: number; rerender?: () => Promise<string | null>; pending?: string; exec?: string; choices?: string[];
+}
 
 const fail = (message: string): RunResult => ({ stdout: `brb: ${message}\nRun brb --help for usage.\n`, exitCode: 1 });
 
@@ -80,7 +84,9 @@ export async function run(o: RunOptions): Promise<RunResult> {
   const color = !values['no-color'] && o.isTTY && !('NO_COLOR' in o.env);
   const view = { color, columns: o.columns ?? 100, all: values.all ?? false, numbered: values.exclude === undefined };
   const stdout = renderTerminal(c, view);
-  if (!o.isTTY || values['no-ai'] || o.env.BRB_NO_AI === '1') return { stdout, exitCode: 0 };
+  const listed = [...(c.here?.rows ?? []), ...c.elsewhere];
+  const choices = o.isTTY && view.numbered && listed.length > 0 ? listed.map((r) => r.resume) : undefined;
+  if (!o.isTTY || values['no-ai'] || o.env.BRB_NO_AI === '1') return { stdout, exitCode: 0, choices };
 
   // The facts above print first; the caller asks for this afterwards, so AI never delays them.
   const rerender = async (): Promise<string | null> => {
@@ -94,14 +100,47 @@ export async function run(o: RunOptions): Promise<RunResult> {
     for (const r of rows) r.summary = summaries.get(summaryKey(r));
     return renderTerminal(c, view);
   };
-  return { stdout, exitCode: 0, rerender, pending: pc.createColors(color).dim('summarizing… (Ctrl-C to skip)') };
+  return { stdout, exitCode: 0, rerender, choices, pending: pc.createColors(color).dim('summarizing… (Ctrl-C to skip)') };
 }
 
 // Escape string that follows the first screen and its "pending" line: it wipes them and prints the new screen in their place.
 // The new screen is only drawn if the old one never scrolled, else only the pending line goes (it is always the line just above the cursor).
-export function redraw(shown: string, next: string | null, rows: number): string {
-  const lines = shown.split('\n').length; // the screen's lines (it ends in a newline), plus the pending line
+// A line wider than the terminal wraps onto more rows, and the cursor has to climb all of them.
+// shortcut: counts characters, not display width, so wide (CJK, emoji) titles can undercount; use a width table if that shows up.
+export function redraw(shown: string, next: string | null, rows: number, columns = Infinity): string {
+  const width = (line: string): number => line.replace(/\x1b\[[0-9;]*m/g, '').length;
+  // The screen's lines (it ends in a newline, so the last one is the pending line).
+  const lines = shown.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(width(line) / columns)), 0);
   return next !== null && lines < rows ? `\x1b[${lines}F\x1b[0J${next}` : '\x1b[1F\x1b[0J';
+}
+
+// What an answer to "pick a session" means: a row number, quit (nothing typed, or q), or anything else to ask again.
+export function parsePick(answer: string, count: number): number | 'quit' | 'again' {
+  const a = answer.trim().toLowerCase();
+  if (a === '' || a === 'q') return 'quit';
+  const n = /^\d+$/.test(a) ? Number(a) : 0;
+  return n >= 1 && n <= count ? n : 'again';
+}
+
+// Asks for a row number until it gets one, or the user quits (Enter, q, Ctrl-C, Ctrl-D).
+async function askPick(choices: string[]): Promise<string | undefined> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  // Closing alone leaves a pending question unsettled, so cancel it too.
+  const cancel = new AbortController();
+  rl.on('SIGINT', () => rl.close());
+  rl.on('close', () => cancel.abort());
+  try {
+    for (;;) {
+      const answer = await rl.question(pc.dim(`Pick a session (1-${choices.length}), Enter to quit: `), { signal: cancel.signal });
+      const pick = parsePick(answer, choices.length);
+      if (pick === 'quit') return undefined;
+      if (pick !== 'again') return choices[pick - 1];
+    }
+  } catch {
+    return undefined; // the question was cut short by Ctrl-C or Ctrl-D
+  } finally {
+    rl.close();
+  }
 }
 
 async function readStdin(): Promise<string> {
@@ -120,13 +159,20 @@ async function main(): Promise<void> {
     });
     process.stdout.write(result.stdout);
     process.exitCode = result.exitCode;
-    if (result.exec) process.exitCode = spawnSync('/bin/sh', ['-c', result.exec], { stdio: 'inherit' }).status ?? 1;
     if (result.rerender) { // only given for an interactive terminal
       process.stdout.write(`${result.pending}\n`);
-      process.once('SIGINT', () => { process.stdout.write(redraw(result.stdout, null, 0)); process.exit(); });
+      const skip = () => { process.stdout.write(redraw(result.stdout, null, 0)); process.exit(); };
+      process.once('SIGINT', skip);
       const next = await result.rerender().catch(() => null); // the facts are already on screen
-      process.stdout.write(redraw(result.stdout, next, process.stdout.rows ?? 0));
+      process.off('SIGINT', skip);
+      process.stdout.write(redraw(result.stdout, next, process.stdout.rows ?? 0, process.stdout.columns));
     }
+    let command = result.exec;
+    if (result.choices && process.stdin.isTTY) {
+      command = await askPick(result.choices);
+      if (command) process.stdout.write(`→ ${commandText(command)}\n`);
+    }
+    if (command) process.exitCode = spawnSync('/bin/sh', ['-c', command], { stdio: 'inherit' }).status ?? 1;
   } catch (err) {
     if (argv[0] !== 'hook') throw err; // a hook that fails is shown to the user, so it exits 0 whatever goes wrong (even process.cwd() or reading stdin)
   }

@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import pkg from '../package.json';
-import { HELP, redraw, run } from '../src/cli';
+import { HELP, parsePick, redraw, run } from '../src/cli';
 import { EXPECTED_TERMINAL, IDS, NOW } from './support/expected';
 import { seedScenario } from './support/scenario';
 
@@ -123,4 +123,27 @@ test('--exclude drops the row numbers, since they would not match brb <number>',
   const { stdout } = await brb(['--exclude', IDS.wait]);
   expect(stdout).toContain('\n ● Claude  add login rate limit');
   expect(stdout).not.toContain('brb <number>');
+});
+
+test('redraw climbs every row a wrapped line takes, colors not counted', () => {
+  const long = `\x1b[2m${'x'.repeat(250)}\x1b[22m`; // 250 characters on a 100-column terminal: 3 rows
+  expect(redraw(`a\n${long}\n`, 'new\n', 24, 100)).toBe('\x1b[5F\x1b[0Jnew\n');
+  expect(redraw(`${'x'.repeat(100)}\n`, 'new\n', 24, 100)).toBe('\x1b[2F\x1b[0Jnew\n'); // exactly full: no wrap
+});
+
+test('parsePick takes a listed number, quits on Enter or q, asks again on anything else', () => {
+  expect(parsePick(' 5 ', 29)).toBe(5);
+  expect(parsePick('', 29)).toBe('quit');
+  expect(parsePick('Q', 29)).toBe('quit');
+  for (const a of ['0', '30', 'x', '2a', '-1', '1.5']) expect(parsePick(a, 29)).toBe('again');
+});
+
+test('a terminal run offers every numbered row to pick from, in screen order', async () => {
+  const { choices } = await run({ argv: ['--no-ai'], env: { HOME: world.home }, cwd: world.repo, now: NOW, isTTY: true });
+  expect(choices).toHaveLength(4);
+  expect(choices![0]).toBe(`claude --resume ${IDS.wait}`);
+  expect(choices![3]).toMatch(/gemini --resume/);
+  expect((await brb([])).choices).toBeUndefined(); // no terminal
+  const excluded = await run({ argv: ['--no-ai', '--exclude', IDS.wait], env: { HOME: world.home }, cwd: world.repo, now: NOW, isTTY: true });
+  expect(excluded.choices).toBeUndefined(); // no numbers on screen, so nothing to pick by number
 });

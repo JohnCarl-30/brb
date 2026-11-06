@@ -48,7 +48,7 @@ Run it inside a project to see that project first. Run it anywhere else to see e
 - **Finished.** A session that did its work, with the last thing it said.
 - **Stopped.** A session that hit an error, was interrupted, or whose last test or build failed. brb shows the error.
 - **Your own edits.** Uncommitted changes that no AI session made, plus any TODO you added.
-- **The way back in.** Every session is numbered. `brb 2` drops you back into session 2, in its own folder and its own CLI. A footer also lists up to three next steps, each with the exact command, such as `claude --resume <id>` or `codex resume <id>`. `--all` adds a resume command under every session.
+- **The way back in.** Every session is numbered. Type a number at the prompt, or run `brb 2`, and you're back in session 2, in its own folder and its own CLI. A footer also lists up to three next steps, each with the exact command, such as `claude --resume <id>` or `codex resume <id>`. `--all` adds a resume command under every session.
 
 Sessions in the project you are standing in come first. Other projects follow, one line each.
 
@@ -65,17 +65,19 @@ Sessions in the project you are standing in come first. Other projects follow, o
 
 ## Picking a session back up
 
-Every session row has a number. Give brb that number and it hands your terminal to the session:
+Every session row has a number. In a terminal, brb asks which one you want right after the list:
 
 ```
-brb 3
+Pick a session (1-4), Enter to quit: 3
 → codex resume 019a0000-0000-7000-8000-000000000003
 ```
+
+Type the number and press Enter. Enter on its own, `q` or Ctrl-C leaves without resuming anything. If you already know the number, skip the question with `brb 3`.
 
 brb prints the command, then runs it. A session from another project gets a `cd` into its folder first, so you land in the right place with the right CLI: `claude --resume`, `codex resume` or `gemini --resume`. When you quit that CLI you're back in your shell, and brb exits with the CLI's exit code.
 
 - With npx, the number goes at the end: `npx @john_carl/brb 3`.
-- Outside a terminal, piped or in a script, `brb 3` only prints the command.
+- Outside a terminal, piped or in a script, brb doesn't ask, and `brb 3` only prints the command.
 - Use the same `--since` you used for the list, so the numbers match.
 - `/brb` inside Claude Code shows the list without numbers, because it leaves out the session you're typing in.
 
