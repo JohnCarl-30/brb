@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { version } from '../package.json';
 import { computeCatchUp } from './compute';
+import { runHook } from './hooks';
 import { realpath } from './projects';
 import { renderBrief, renderJson, renderTerminal } from './render';
 import { parseSince } from './time';
@@ -23,18 +24,20 @@ Usage: brb [options]
 brb reads your local Claude Code, Codex and Gemini CLI history. No API key.
 `;
 
-// `runner` and `which` are for the AI summaries; `stdin` is for `brb hook`. Nothing reads them yet.
+// `runner` and `which` are for the AI summaries (nothing reads them yet); `stdin` is for `brb hook`.
 export interface RunOptions { argv: string[]; env: NodeJS.ProcessEnv; cwd: string; now: number; isTTY: boolean; columns?: number; stdin?: string; runner?: unknown; which?: (bin: string) => boolean }
 export interface RunResult { stdout: string; exitCode: number; rerender?: () => Promise<string | null> }
 
 const fail = (message: string): RunResult => ({ stdout: `brb: ${message}\nRun brb --help for usage.\n`, exitCode: 1 });
 
 export async function run(o: RunOptions): Promise<RunResult> {
+  // Before the args are parsed, so a hook can't end in a usage error: it must exit 0.
+  if (o.argv[0] === 'hook') return runHook(o.argv[1] ?? '', o.stdin ?? '', o);
   let values;
   try {
     ({ values } = parseArgs({
       args: o.argv,
-      allowPositionals: true, // `hook` and anything else a later task reads
+      allowPositionals: true,
       options: {
         all: { type: 'boolean' }, since: { type: 'string' }, json: { type: 'boolean' }, brief: { type: 'boolean' },
         'no-ai': { type: 'boolean' }, 'no-color': { type: 'boolean' }, exclude: { type: 'string' },
@@ -69,12 +72,16 @@ async function readStdin(): Promise<string> {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  const result = await run({
-    argv, env: process.env, cwd: process.cwd(), now: Date.now(), isTTY: Boolean(process.stdout.isTTY),
-    columns: process.stdout.columns, stdin: argv[0] === 'hook' ? await readStdin() : undefined,
-  });
-  process.stdout.write(result.stdout);
-  process.exitCode = result.exitCode;
+  try {
+    const result = await run({
+      argv, env: process.env, cwd: process.cwd(), now: Date.now(), isTTY: Boolean(process.stdout.isTTY),
+      columns: process.stdout.columns, stdin: argv[0] === 'hook' ? await readStdin() : undefined,
+    });
+    process.stdout.write(result.stdout);
+    process.exitCode = result.exitCode;
+  } catch (err) {
+    if (argv[0] !== 'hook') throw err; // a hook that fails is shown to the user, so it exits 0 whatever goes wrong (even process.cwd() or reading stdin)
+  }
 }
 
 // Only when this file is the entry point. An npm bin link is a symlink to it, so compare real paths; tests import this file.

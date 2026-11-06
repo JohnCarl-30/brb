@@ -107,7 +107,7 @@ var version = "0.1.0";
 
 // src/compute.ts
 import * as os2 from "os";
-import * as path5 from "path";
+import * as path6 from "path";
 
 // src/adapters/index.ts
 import * as os from "os";
@@ -181,13 +181,13 @@ async function mtimeOf(file) {
 async function recentFiles(dir, name, sinceMs, maxDepth) {
   async function walk(folder, depth) {
     const found = await Promise.all((await listFolder(folder)).map(async (entry) => {
-      const path6 = join(folder, entry.name);
+      const path7 = join(folder, entry.name);
       if (entry.isDirectory()) {
-        return entry.name !== "subagents" && depth < maxDepth ? walk(path6, depth + 1) : [];
+        return entry.name !== "subagents" && depth < maxDepth ? walk(path7, depth + 1) : [];
       }
       if (!entry.isFile() || !name.test(entry.name)) return [];
-      const mtimeMs = await mtimeOf(path6);
-      return mtimeMs !== null && mtimeMs > sinceMs ? [{ path: path6, mtimeMs }] : [];
+      const mtimeMs = await mtimeOf(path7);
+      return mtimeMs !== null && mtimeMs > sinceMs ? [{ path: path7, mtimeMs }] : [];
     }));
     return found.flat();
   }
@@ -204,10 +204,10 @@ async function readRange(handle, position, length) {
   return buffer.toString("utf8", 0, filled);
 }
 var toLines = (text) => text.split("\n").filter((line) => line !== "");
-async function readHeadTail(path6) {
+async function readHeadTail(path7) {
   let handle;
   try {
-    handle = await open(path6, "r");
+    handle = await open(path7, "r");
   } catch (error) {
     if (isMissing(error)) return { lines: [], tailStart: null };
     throw error;
@@ -224,9 +224,9 @@ async function readHeadTail(path6) {
     await handle.close();
   }
 }
-async function readText(path6) {
+async function readText(path7) {
   try {
-    return await readFile(path6, "utf8");
+    return await readFile(path7, "utf8");
   } catch (error) {
     if (isMissing(error)) return null;
     throw error;
@@ -896,14 +896,49 @@ function addedTodos(root, files) {
   return files.flatMap((file) => inIndex.has(file) ? patch.get(file) ?? [] : scanWhole(root, file));
 }
 
+// src/pending.ts
+import * as fs3 from "fs";
+import * as path5 from "path";
+var MARKER = /^claude-([\w-]+)\.json$/;
+function recordPermissionRequest(brbHome, sessionId, message, now) {
+  if (!/^[\w-]+$/.test(sessionId)) return;
+  const dir = path5.join(brbHome, "pending");
+  fs3.mkdirSync(dir, { recursive: true });
+  fs3.writeFileSync(path5.join(dir, `claude-${sessionId}.json`), JSON.stringify({ at: now, message }));
+}
+function readPermissionRequests(brbHome, now) {
+  const dir = path5.join(brbHome, "pending");
+  const found = /* @__PURE__ */ new Map();
+  let names;
+  try {
+    names = fs3.readdirSync(dir);
+  } catch {
+    return found;
+  }
+  for (const name of names) {
+    const id = MARKER.exec(name)?.[1];
+    if (id === void 0) continue;
+    try {
+      const marker = JSON.parse(fs3.readFileSync(path5.join(dir, name), "utf8"));
+      const { at, message } = marker;
+      if (typeof at !== "number" || typeof message !== "string") continue;
+      if (now - at > SCAN_MS) fs3.rmSync(path5.join(dir, name), { force: true });
+      else found.set(id, { at, message });
+    } catch {
+    }
+  }
+  return found;
+}
+
 // src/compute.ts
 async function computeCatchUp(o) {
-  const { sessions, warnings } = await loadAllSessions(resolveRoots(o.env), o.now);
+  const roots = resolveRoots(o.env);
+  const { sessions, warnings } = await loadAllSessions(roots, o.now);
   const snapshot = readGit(o.cwd);
   let git2 = null;
   if (snapshot) {
     const agent = agentEditedFiles(sessions, projectFor(o.cwd).key);
-    const yours = snapshot.changes.filter((c) => !agent.has(realpath(path5.resolve(snapshot.root, c.file))));
+    const yours = snapshot.changes.filter((c) => !agent.has(realpath(path6.resolve(snapshot.root, c.file))));
     git2 = { root: snapshot.root, branch: snapshot.branch, yours, todos: addedTodos(snapshot.root, yours.map((c) => c.file)) };
   }
   return buildCatchUp({
@@ -911,7 +946,7 @@ async function computeCatchUp(o) {
     cwd: o.cwd,
     home: o.env.HOME ?? os2.homedir(),
     sessions,
-    permissions: /* @__PURE__ */ new Map(),
+    permissions: readPermissionRequests(roots.brb, o.now),
     git: git2,
     excludeSessionId: o.excludeSessionId,
     sinceMs: o.sinceMs,
@@ -1012,6 +1047,35 @@ function renderBrief(c) {
 }
 var renderJson = (c) => JSON.stringify(c, (key, value) => key === "longText" ? void 0 : value, 2);
 
+// src/hooks.ts
+var QUIET = { stdout: "", exitCode: 0 };
+async function runHook(name, stdin, o) {
+  if (o.env.BRB_INTERNAL === "1") return QUIET;
+  try {
+    const input = JSON.parse(stdin) ?? {};
+    const sessionId = typeof input.session_id === "string" ? input.session_id : void 0;
+    if (name === "notification") {
+      const message = typeof input.message === "string" ? input.message : "";
+      if (sessionId !== void 0 && (/permission/i.test(message) || input.notification_type === "permission_prompt")) {
+        recordPermissionRequest(resolveRoots(o.env).brb, sessionId, oneLine(message, 80), o.now);
+      }
+      return QUIET;
+    }
+    if (name === "session-start") {
+      const c = await computeCatchUp({ env: o.env, cwd: typeof input.cwd === "string" ? input.cwd : o.cwd, now: o.now, excludeSessionId: sessionId });
+      const brief = renderBrief(c);
+      if (brief === "") return QUIET;
+      const rows = c.here?.rows ?? [];
+      const waiting = rows.filter((r) => r.status === "waiting").length;
+      const hookSpecificOutput = { hookEventName: "SessionStart", additionalContext: brief };
+      const systemMessage = rows.length === 0 ? void 0 : `brb: ${rows.length} other session${rows.length === 1 ? "" : "s"} in this project${waiting > 0 ? ` \xB7 ${waiting} waiting on you` : ""}`;
+      return { stdout: JSON.stringify({ systemMessage, hookSpecificOutput }) + "\n", exitCode: 0 };
+    }
+  } catch {
+  }
+  return QUIET;
+}
+
 // src/cli.ts
 var HELP = `brb: catch up on every AI coding session when you're back
 
@@ -1033,12 +1097,12 @@ var fail = (message) => ({ stdout: `brb: ${message}
 Run brb --help for usage.
 `, exitCode: 1 });
 async function run(o) {
+  if (o.argv[0] === "hook") return runHook(o.argv[1] ?? "", o.stdin ?? "", o);
   let values;
   try {
     ({ values } = parseArgs({
       args: o.argv,
       allowPositionals: true,
-      // `hook` and anything else a later task reads
       options: {
         all: { type: "boolean" },
         since: { type: "string" },
@@ -1076,17 +1140,21 @@ async function readStdin() {
 }
 async function main() {
   const argv = process.argv.slice(2);
-  const result = await run({
-    argv,
-    env: process.env,
-    cwd: process.cwd(),
-    now: Date.now(),
-    isTTY: Boolean(process.stdout.isTTY),
-    columns: process.stdout.columns,
-    stdin: argv[0] === "hook" ? await readStdin() : void 0
-  });
-  process.stdout.write(result.stdout);
-  process.exitCode = result.exitCode;
+  try {
+    const result = await run({
+      argv,
+      env: process.env,
+      cwd: process.cwd(),
+      now: Date.now(),
+      isTTY: Boolean(process.stdout.isTTY),
+      columns: process.stdout.columns,
+      stdin: argv[0] === "hook" ? await readStdin() : void 0
+    });
+    process.stdout.write(result.stdout);
+    process.exitCode = result.exitCode;
+  } catch (err) {
+    if (argv[0] !== "hook") throw err;
+  }
 }
 if (process.argv[1] && realpath(process.argv[1]) === realpath(fileURLToPath(import.meta.url))) await main();
 export {

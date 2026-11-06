@@ -3,10 +3,12 @@ import * as path from 'node:path';
 import { loadAllSessions, resolveRoots } from './adapters';
 import { agentEditedFiles, buildCatchUp, type CatchUp } from './catchup';
 import { addedTodos, readGit } from './git';
+import { readPermissionRequests } from './pending';
 import { projectFor, realpath } from './projects';
 
 export async function computeCatchUp(o: { env: NodeJS.ProcessEnv; cwd: string; now: number; excludeSessionId?: string; sinceMs?: number }): Promise<CatchUp> {
-  const { sessions, warnings } = await loadAllSessions(resolveRoots(o.env), o.now);
+  const roots = resolveRoots(o.env);
+  const { sessions, warnings } = await loadAllSessions(roots, o.now);
 
   const snapshot = readGit(o.cwd);
   let git = null;
@@ -18,7 +20,7 @@ export async function computeCatchUp(o: { env: NodeJS.ProcessEnv; cwd: string; n
   }
 
   return buildCatchUp({
-    now: o.now, cwd: o.cwd, home: o.env.HOME ?? os.homedir(), sessions, permissions: new Map(), git,
+    now: o.now, cwd: o.cwd, home: o.env.HOME ?? os.homedir(), sessions, permissions: readPermissionRequests(roots.brb, o.now), git,
     excludeSessionId: o.excludeSessionId, sinceMs: o.sinceMs, warnings,
   });
 }
