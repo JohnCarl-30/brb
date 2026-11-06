@@ -53,7 +53,8 @@ export function classify(s: Session, now: number, permission?: PermissionRequest
 
   const question = lastQuestion(said);
   const didWork = turn.some((e) => e.kind === 'edit' || e.kind === 'command');
-  if (question && !didWork) {
+  // "No work" is only known when the whole turn was read: a partly read one may have worked in the part that was skipped.
+  if (question && !didWork && !s.partialTurn) {
     return { status: 'waiting', detail: `asks: "${question}"`, longText: said };
   }
 

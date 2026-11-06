@@ -163,3 +163,14 @@ test('without a user event every event is in the turn', () => {
   const events = [command(min(20), false, 'Error: boom'), turnEnd(min(19))];
   expect(classify(s(events), NOW)).toMatchObject({ status: 'failed', detail: 'Error: boom' });
 });
+
+test('a question after no work is finished when only part of the turn was read', () => {
+  const said = 'Should I round per item or on the total?';
+  const events = [user(min(10)), agent(min(9), said), turnEnd(min(9))];
+  expect(classify({ ...s(events), partialTurn: true }, NOW)).toEqual({ status: 'finished', detail: said, longText: said });
+});
+
+test('a partly read turn still waits on a structured ask', () => {
+  const events = [user(min(10)), ask(min(9), 'question', 'Which one?')];
+  expect(classify({ ...s(events), partialTurn: true }, NOW)).toEqual({ status: 'waiting', detail: 'asks: "Which one?"', longText: '' });
+});
