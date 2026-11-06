@@ -58,14 +58,19 @@ function addToolResult(t: Transcript, block: any, at: number): void {
 
 function addUser(t: Transcript, line: any, at: number, inTail: boolean): void {
   const content = line.message?.content;
-  if (Array.isArray(content)) {
-    for (const block of content) if (block?.type === 'tool_result') addToolResult(t, block, at);
+  let hasToolResult = false;
+  for (const block of Array.isArray(content) ? content : []) {
+    if (block?.type !== 'tool_result') continue;
+    hasToolResult = true;
+    addToolResult(t, block, at);
   }
   const text = textOf(content);
   if (text.trim() === '') return;
   if (text.startsWith(INTERRUPT_PREFIX)) {
     t.events.push({ kind: 'error', at, text: 'interrupted' });
-  } else if (line.promptSource !== 'system' && !NOT_HUMAN_ORIGINS.has(line.turnOrigin)) {
+  } else if (!hasToolResult && line.promptSource !== 'system' && !NOT_HUMAN_ORIGINS.has(line.turnOrigin)) {
+    // A line that carries a tool result is the harness answering the agent, so it is never a human prompt,
+    // whatever text rides along. The interrupt notice above is the one thing such a line can say.
     t.events.push({ kind: 'user', at, text });
     if (inTail) t.humanPromptInTail = true;
   }

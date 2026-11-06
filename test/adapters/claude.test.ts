@@ -158,6 +158,51 @@ test('a prompt whose origin is the system, with no prompt source, is not the hum
   expect(classify(s, NOW).status).toBe('finished');
 });
 
+// A user line that carries a tool result is the harness answering the agent, whatever text rides along with it.
+const withNote = (id: string, at: number, order: 'result first' | 'note first') => {
+  const result = { type: 'tool_result', tool_use_id: id, content: 'contents', is_error: false };
+  const note = { type: 'text', text: 'a note that rides along with the result' };
+  return { ...cl.result(id, '', at), message: { role: 'user', content: order === 'result first' ? [result, note] : [note, result] } };
+};
+
+test('a user line that carries a tool result is never a human prompt', async () => {
+  const h = fakeHome();
+  writeClaudeSession(h, { id: 'c1', cwd: '/w/app', lines: [
+    cl.user('add a rate limiter', min(30)),
+    cl.tool('w1', 'Write', { file_path: '/w/app/src/rateLimit.ts' }, min(29)),
+    cl.result('w1', 'File created successfully', min(28)),
+    cl.tool('r1', 'Read', { file_path: '/w/app/src/cart.ts' }, min(27)),
+    withNote('r1', min(26), 'result first'),
+    cl.tool('r2', 'Read', { file_path: '/w/app/src/pay.ts' }, min(25)),
+    withNote('r2', min(24), 'note first'),
+    cl.say('Added the limiter. Want me to add tests too?', min(22)),
+  ] });
+  const [s] = await read(h);
+  expect(kinds(s)).toEqual(['user', 'edit', 'agent', 'turn-end']); // the one prompt is the human's
+  // Were a note a prompt, it would start a new turn without the edit, and the closing question would read as waiting.
+  expect(classify(s, NOW).status).toBe('finished');
+});
+
+test('an interrupt notice that rides along with a tool result is still an interrupt', async () => {
+  const h = fakeHome();
+  const refused = "The user doesn't want to proceed with this tool use.";
+  const interrupted = { ...cl.result('b1', refused, min(8), true), message: { role: 'user', content: [
+    { type: 'tool_result', tool_use_id: 'b1', content: refused, is_error: true },
+    { type: 'text', text: '[Request interrupted by user for tool use]' },
+  ] } };
+  writeClaudeSession(h, { id: 'c1', cwd: '/w/app', lines: [
+    cl.user('run the build', min(10)),
+    cl.tool('b1', 'Bash', { command: 'npm run build' }, min(9)),
+    interrupted,
+  ] });
+  const [s] = await read(h);
+  expect(s.events).toEqual([
+    { kind: 'user', at: min(10), text: 'run the build' },
+    { kind: 'command', at: min(8), command: 'npm run build', ok: false, output: refused },
+    { kind: 'error', at: min(8), text: 'interrupted' },
+  ]);
+});
+
 test('queued prompts, accepted suggestions and prompts sent through the SDK are still the human talking', async () => {
   const h = fakeHome();
   writeClaudeSession(h, { id: 'c1', cwd: '/w/app', lines: [

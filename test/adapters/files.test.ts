@@ -94,6 +94,15 @@ test('readHeadTail returns nothing for an empty file', async () => {
   expect(await readHeadTail(writeFile(''))).toEqual({ lines: [], tailStart: null });
 });
 
+test('readHeadTail returns nothing for a file that no longer exists', async () => {
+  expect(await readHeadTail(path.join(dir, 'gone.jsonl'))).toEqual({ lines: [], tailStart: null });
+});
+
+test('readHeadTail reports errors other than a missing file', async () => {
+  const file = writeFile('{"a":1}\n');
+  await expect(readHeadTail(path.join(file, 'child'))).rejects.toThrow(/ENOTDIR/);
+});
+
 test('readHeadTail reads a file of exactly head plus tail bytes whole', async () => {
   const { lines, tailStart } = await readHeadTail(writeFile(rows((HEAD_BYTES + TAIL_BYTES) / ROW_BYTES)));
   expect(tailStart).toBeNull();

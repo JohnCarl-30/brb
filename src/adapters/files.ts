@@ -66,9 +66,15 @@ const toLines = (text: string): string[] => text.split('\n').filter((line) => li
 // followed by the tail's, with `tailStart` the index in `lines` of the first tail line. Then the middle was
 // skipped, so what happened there is unseen. `tailStart` is null when the whole file was read.
 // The line a window cuts in half stays in `lines` as a fragment, and so does a line still being written;
-// parseJsonLines drops both.
+// parseJsonLines drops both. A file that was removed after it was listed has no lines; any other error throws.
 export async function readHeadTail(path: string): Promise<{ lines: string[]; tailStart: number | null }> {
-  const handle = await open(path, 'r');
+  let handle: FileHandle;
+  try {
+    handle = await open(path, 'r');
+  } catch (error) {
+    if (isMissing(error)) return { lines: [], tailStart: null };
+    throw error;
+  }
   try {
     const { size } = await handle.stat();
     if (size <= HEAD_BYTES + TAIL_BYTES) {
