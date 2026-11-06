@@ -18,7 +18,7 @@ No install, no API key, no config.
 - **Finished.** A session that did its work, with the last thing it said.
 - **Stopped.** A session that hit an error, was interrupted, or whose last test or build failed. brb shows the error.
 - **Your own edits.** Uncommitted changes that no AI session made, plus any TODO you added.
-- **The way back in.** Each item ends with the exact command to jump back in, such as `claude --resume <id>` or `codex resume <id>`.
+- **The way back in.** A footer lists up to three next steps, each with the exact command, such as `claude --resume <id>` or `codex resume <id>`. `--all` adds a resume command under every session.
 
 Sessions in the project you are standing in come first. Other projects follow, one line each.
 

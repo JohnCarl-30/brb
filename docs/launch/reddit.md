@@ -13,7 +13,7 @@ I made a plugin that tells Claude, and you, what your other sessions did while y
 Body:
 
 ```
-Claude Code's /recap knows one Claude session. I usually have several going in different worktrees, plus Codex and Gemini CLI, so I wrote brb. It reads the history files those tools already write and prints one screen: what is waiting on you, what finished, what stopped on an error, and what you edited yourself, each with the command to resume it.
+Claude Code's /recap knows one Claude session. I usually have several going in different worktrees, plus Codex and Gemini CLI, so I wrote brb. It reads the history files those tools already write and prints one screen: what is waiting on you, what finished, what stopped on an error, and what you edited yourself, with the exact commands for your next steps.
 
 The plugin adds three things:
 
@@ -39,7 +39,7 @@ One screen for what Claude Code, Codex and Gemini CLI did while you were away
 Body:
 
 ```
-If you run more than one AI coding tool, coming back to your desk means opening each one to find out what happened. brb reads the local session history of Claude Code, Codex CLI and Gemini CLI and prints a single catch-up: what is waiting on you, what finished, what stopped on an error, what you changed yourself, and the exact command to resume each session.
+If you run more than one AI coding tool, coming back to your desk means opening each one to find out what happened. brb reads the local session history of Claude Code, Codex CLI and Gemini CLI and prints a single catch-up: what is waiting on you, what finished, what stopped on an error, what you changed yourself, and the exact commands for your next steps.
 
 npx brb. No install, no API key, no config.
 
