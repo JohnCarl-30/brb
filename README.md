@@ -87,12 +87,12 @@ brb reads your local Claude Code, Codex and Gemini CLI history. No API key.
 ## How it works
 
 - brb reads the history files your tools already write, and only files changed in the last 7 days. It never writes to them. Its own files live under `~/.brb`, and summary prompts under your temp folder.
-- It decides a session's status from its last turn. It never guesses "waiting": when the signs are unclear the session is idle.
+- It decides a session's status from its last turn. It only calls a session waiting on a clear sign: a question tool, a plan, a permission prompt, or a final message that asks something after no work.
 - It groups sessions by git project, so a worktree counts with its main repo.
-- "Away" runs from your last message to an AI session in the project. On a first run it looks back 8 hours. `--since` overrides both.
+- "Away" runs from your last message to an AI session in the project. A project with no message from you looks back 8 hours. `--since` overrides both. Your own file edits don't move it.
 - Your own edits are the uncommitted files that no session's file-edit tool calls account for.
 
-Limits: files Codex changes through shell commands, rather than its patch tool, can't be told apart from your own edits, so they may show up in the You row.
+Limits: files an agent changes through a shell command (Claude's Bash, Codex's shell, Gemini's shell: formatters, `sed -i`, codegen) can't be told apart from your own edits, so they show up in the You row.
 
 ## License
 
