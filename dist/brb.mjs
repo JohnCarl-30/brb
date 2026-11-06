@@ -99,6 +99,7 @@ var require_picocolors = __commonJS({
 });
 
 // src/cli.ts
+var import_picocolors2 = __toESM(require_picocolors(), 1);
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 
@@ -115,6 +116,7 @@ import { basename as basename2, join as join2 } from "path";
 // src/text.ts
 var ESCAPE = /\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[[0-?]*[ -\/]*[@-~]|[()*+\-.\/].|.)/gu;
 var CONTROL_OR_SPACE = /[\x00-\x1f\x7f-\x9f\s]+/g;
+var CONTROL = /[\x00-\x1f\x7f-\x9f\u2028\u2029]/g;
 var MARKDOWN_MARKS = /\*\*|__|`/g;
 var LEADING_MARKERS = /^[\s#*-]*(?:\d+[.)]\s+)?/;
 var SENTENCE_BREAK = /(?<=[.!?])\s+/;
@@ -136,6 +138,7 @@ function oneLine(text, max) {
   }
   return line;
 }
+var commandText = (text) => text.replace(ESCAPE, "").replace(CONTROL, " ");
 function firstSentence(text, max = 70) {
   return oneLine(sentences(text)[0], max);
 }
@@ -370,7 +373,7 @@ var NOT_APPLIED = /* @__PURE__ */ new Set(["failed", "declined"]);
 var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var isReadItem = (line) => line.type === "event_msg" && line.payload?.type === "item_completed" && READ_ITEMS.has(line.payload.item?.type);
 var applied = (source) => source.success !== false && !NOT_APPLIED.has(source.status);
-function commandText(command) {
+function commandText2(command) {
   if (typeof command === "string") return command;
   return Array.isArray(command) ? command.filter((word) => typeof word === "string").join(" ") : "";
 }
@@ -378,7 +381,7 @@ function addSaid(t, kind, text, at) {
   if (text.trim() !== "") t.events.push({ kind, at, text });
 }
 function addCommand(t, source, at) {
-  const command = commandText(source.command);
+  const command = commandText2(source.command);
   if (command.trim() === "") return;
   const output = typeof source.aggregated_output === "string" ? source.aggregated_output : "";
   t.events.push({ kind: "command", at, command, ok: source.exit_code === 0, output: output.slice(-OUTPUT_KEEP_CHARS) });
@@ -711,10 +714,12 @@ var FIRST_RUN_MS = 8 * 60 * 6e4;
 var MAX_FILES = 5;
 var MAX_NEXT = 3;
 var ORDER = ["waiting", "finished", "failed", "working", "idle"];
+var quote = (s) => /^[A-Za-z0-9._/~@+-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`;
+var quotePath = (p) => p.startsWith("~/") ? `~/${quote(p.slice(2))}` : quote(p);
 var RESUME = {
-  claude: (id) => `claude --resume ${id}`,
-  codex: (id) => `codex resume ${id}`,
-  gemini: (id) => `gemini --resume ${id}`
+  claude: (id) => `claude --resume ${quote(id)}`,
+  codex: (id) => `codex resume ${quote(id)}`,
+  gemini: (id) => `gemini --resume ${quote(id)}`
 };
 var inside = (dir, p) => p.startsWith(dir + path3.sep);
 var tilde = (p, home) => p === home || inside(home, p) ? `~${p.slice(home.length)}` : p;
@@ -741,12 +746,11 @@ function buildCatchUp(input) {
   };
   for (const s of sessions) for (const e of s.events) if (e.kind === "user") see(projectFor(s.cwd).key, e.at);
   const lastUserAnywhere = lastSeen.size > 0 ? Math.max(...lastSeen.values()) : void 0;
-  for (const c of git2?.yours ?? []) see(hereProject.key, c.mtimeMs);
   const windowStart = (key) => input.sinceMs !== void 0 ? now - input.sinceMs : lastSeen.get(key) ?? now - FIRST_RUN_MS;
   const seenHere = lastSeen.get(hereProject.key) ?? lastUserAnywhere;
   const awayMs = input.sinceMs !== void 0 || seenHere === void 0 ? null : now - seenHere;
   const hereFolders = new Set([input.cwd, ...git2 ? [git2.root] : []].map(realpath));
-  const resumeFor = (s) => (hereFolders.has(realpath(s.cwd)) ? "" : `cd ${tilde(s.cwd, home)} && `) + RESUME[s.tool](s.id);
+  const resumeFor = (s) => (hereFolders.has(realpath(s.cwd)) ? "" : `cd ${quotePath(tilde(s.cwd, home))} && `) + RESUME[s.tool](s.id);
   const rows = sessions.flatMap((s) => {
     const project = projectFor(s.cwd);
     const verdict = classify(s, now, input.permissions.get(s.id));
@@ -774,7 +778,7 @@ function buildCatchUp(input) {
   const next = [
     ...[...hereRows, ...elsewhere].filter((r) => r.status === "waiting").map((r) => ({ label: `answer ${TOOL_NAME[r.tool]}`, command: r.resume })),
     ...hereRows.filter((r) => r.status === "failed").map((r) => ({ label: "see what broke", command: r.resume })),
-    ...hereRows.filter((r) => r.status === "finished" && r.branch !== void 0 && branch !== null && r.branch !== branch).map((r) => ({ label: `review "${oneLine(r.title, 24)}"`, command: `git diff ${branch}...${r.branch}` })),
+    ...hereRows.filter((r) => r.status === "finished" && r.branch !== void 0 && branch !== null && r.branch !== branch).map((r) => ({ label: `review "${oneLine(r.title, 24)}"`, command: `git diff ${quote(branch)}...${quote(r.branch)}` })),
     ...you?.todos[0] ? [{ label: "pick up your TODO", command: `${you.todos[0].file}:${you.todos[0].line}` }] : []
   ].slice(0, MAX_NEXT);
   return { now, awayMs, warnings: input.warnings, sessions: sessions.length, here, elsewhere, next };
@@ -978,7 +982,7 @@ function renderTerminal(c, o) {
     const paint = tint[r.status];
     const lines = [` ${paint(MARK[r.status])} ${TOOL_NAME[r.tool].padEnd(7)} ${oneLine(title, TITLE_WIDTH).padEnd(TITLE_WIDTH)} ${paint(LABEL[r.status](formatAge(c.now - r.at)))}`];
     if (withDetail) lines.push(DETAIL_INDENT + k.dim(oneLine(r.summary ?? r.detail, detailWidth)));
-    if (o.all) lines.push(DETAIL_INDENT + k.dim(`\u2192 ${oneLine(r.resume, LONG)}`));
+    if (o.all) lines.push(DETAIL_INDENT + k.dim(`\u2192 ${commandText(r.resume)}`));
     return lines;
   };
   const rows = (c.here?.rows.length ?? 0) + c.elsewhere.length;
@@ -1009,7 +1013,7 @@ function renderTerminal(c, o) {
     ]);
   }
   if (c.next.length > 0) {
-    const steps = c.next.map((s) => ({ label: oneLine(s.label, LONG), command: oneLine(s.command, LONG) }));
+    const steps = c.next.map((s) => ({ label: oneLine(s.label, LONG), command: commandText(s.command) }));
     const width = Math.max(...steps.map((s) => s.label.length));
     sections.push(steps.map((s) => ` ${k.yellow("\u2192")} ${s.label.padEnd(width)}  ${s.command}`));
   }
@@ -1085,13 +1089,13 @@ var PROMPT = "Summarize this AI coding session update for its developer in 8 wor
 var MAX_JOBS = 8;
 var MAX_TEXT = 2e3;
 var MAX_CACHED = 500;
-var TIMEOUT_MS = 3e4;
+var TIMEOUT_MS = 2e4;
 var SUMMARY_WIDTH = 60;
 var QUOTES = /^["'`“”‘’]+|["'`“”‘’]+$/g;
 function commandFor(tool, prompt) {
-  if (tool === "claude") return { bin: "claude", args: ["-p", "--model", "haiku", "--no-session-persistence", prompt] };
-  if (tool === "codex") return { bin: "codex", args: ["exec", "--skip-git-repo-check", "--ephemeral", prompt] };
-  return { bin: "gemini", args: ["-p", prompt] };
+  if (tool === "claude") return { bin: "claude", args: ["-p", "--model", "haiku", "--no-session-persistence", "--tools", "", "--strict-mcp-config", prompt] };
+  if (tool === "codex") return { bin: "codex", args: ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", prompt] };
+  return { bin: "gemini", args: ["-p", prompt, "--approval-mode", "plan"] };
 }
 var summaryKey = (r) => `${r.tool}:${r.sessionId}:${r.at}`;
 function readCache(file) {
@@ -1145,8 +1149,8 @@ async function summarizeRows(rows, o) {
   for (const [key, line] of Object.entries(fresh)) result.set(key, line);
   if (Object.keys(fresh).length > 0) {
     try {
-      fs4.mkdirSync(path7.dirname(file), { recursive: true });
-      fs4.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries({ ...cache2, ...fresh }).slice(-MAX_CACHED))));
+      fs4.mkdirSync(path7.dirname(file), { recursive: true, mode: 448 });
+      fs4.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries({ ...cache2, ...fresh }).slice(-MAX_CACHED))), { mode: 384 });
     } catch {
     }
   }
@@ -1247,7 +1251,11 @@ async function run(o) {
     for (const r of rows) r.summary = summaries.get(summaryKey(r));
     return renderTerminal(c, view);
   };
-  return { stdout, exitCode: 0, rerender };
+  return { stdout, exitCode: 0, rerender, pending: import_picocolors2.default.createColors(color).dim("summarizing\u2026 (Ctrl-C to skip)") };
+}
+function redraw(shown, next, rows) {
+  const lines = shown.split("\n").length;
+  return next !== null && lines < rows ? `\x1B[${lines}F\x1B[0J${next}` : "\x1B[1F\x1B[0J";
 }
 async function readStdin() {
   if (process.stdin.isTTY) return "";
@@ -1270,12 +1278,14 @@ async function main() {
     process.stdout.write(result.stdout);
     process.exitCode = result.exitCode;
     if (result.rerender) {
-      try {
-        const next = await result.rerender();
-        const lines = result.stdout.split("\n").length - 1;
-        if (next !== null && lines < (process.stdout.rows ?? 0)) process.stdout.write(`\x1B[${lines}F\x1B[0J${next}`);
-      } catch {
-      }
+      process.stdout.write(`${result.pending}
+`);
+      process.once("SIGINT", () => {
+        process.stdout.write(redraw(result.stdout, null, 0));
+        process.exit();
+      });
+      const next = await result.rerender().catch(() => null);
+      process.stdout.write(redraw(result.stdout, next, process.stdout.rows ?? 0));
     }
   } catch (err) {
     if (argv[0] !== "hook") throw err;
@@ -1284,5 +1294,6 @@ async function main() {
 if (process.argv[1] && realpath(process.argv[1]) === realpath(fileURLToPath(import.meta.url))) await main();
 export {
   HELP,
+  redraw,
   run
 };
