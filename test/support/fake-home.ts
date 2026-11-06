@@ -67,3 +67,45 @@ export function writeClaudeSession(
   if (mtime !== undefined) fs.utimesSync(file, new Date(mtime), new Date(mtime));
   return file;
 }
+
+// ---- Codex CLI: <codex>/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl, with thread names in <codex>/session_index.jsonl
+// Two formats share this layout. Current files wrap each finished thing in an `item_completed` event;
+// older ones have one event type per kind of thing (`user_message`, `exec_command_end`, ...).
+
+const item = (at: number, it: object) => ({ timestamp: iso(at), type: 'event_msg', payload: { type: 'item_completed', item: it } });
+const ev = (at: number, payload: object) => ({ timestamp: iso(at), type: 'event_msg', payload });
+
+export const cx = {
+  meta: (id: string, cwd: string, at: number) => ({ timestamp: iso(at), type: 'session_meta', payload: { id, cwd, timestamp: iso(at) } }),
+  user: (text: string, at: number) => item(at, { type: 'UserMessage', content: [{ type: 'text', text }] }),
+  say: (text: string, at: number) => item(at, { type: 'AgentMessage', content: [{ type: 'text', text }], phase: 'final_answer' }),
+  run: (command: string, exitCode: number, output: string, at: number) => item(at, { type: 'CommandExecution', command, exit_code: exitCode, status: exitCode === 0 ? 'completed' : 'failed', aggregated_output: output }),
+  change: (paths: string[], at: number) => item(at, { type: 'FileChange', changes: Object.fromEntries(paths.map((p) => [p, { type: 'update' }])), status: 'completed' }),
+  started: (at: number) => ev(at, { type: 'task_started', turn_id: 't' }),
+  done: (at: number) => ev(at, { type: 'task_complete', turn_id: 't', last_agent_message: null }),
+  legacyUser: (text: string, at: number) => ev(at, { type: 'user_message', message: text }),
+  legacySay: (text: string, at: number) => ev(at, { type: 'agent_message', message: text }),
+  legacyRun: (command: string[], exitCode: number, output: string, at: number) => ev(at, { type: 'exec_command_end', command, exit_code: exitCode, aggregated_output: output }),
+  legacyAbort: (at: number) => ev(at, { type: 'turn_aborted', reason: 'interrupted' }),
+};
+
+// The file is named and filed by the first line's time, in UTC so the path doesn't depend on the machine's time zone.
+// `threadName` adds a line for the session to the index. The file's mtime is `mtimeMs`, or else the newest timestamp.
+// Returns the file path.
+export function writeCodexSession(h: FakeHome, o: { id: string; lines: object[]; threadName?: string; mtimeMs?: number }): string {
+  const times = o.lines.map(timestampOf).filter((t): t is number => t !== undefined && !Number.isNaN(t));
+  const mtime = o.mtimeMs ?? (times.length > 0 ? Math.max(...times) : undefined);
+
+  const [date, time] = iso(times[0] ?? mtime ?? 0).slice(0, 19).split('T');
+  const dir = path.join(h.codex, 'sessions', ...date.split('-'));
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `rollout-${date}T${time.replace(/:/g, '-')}-${o.id}.jsonl`);
+  fs.writeFileSync(file, o.lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
+  if (mtime !== undefined) fs.utimesSync(file, new Date(mtime), new Date(mtime));
+
+  if (o.threadName !== undefined) {
+    const entry = { id: o.id, thread_name: o.threadName, updated_at: iso(mtime ?? 0) };
+    fs.appendFileSync(path.join(h.codex, 'session_index.jsonl'), JSON.stringify(entry) + '\n');
+  }
+  return file;
+}
