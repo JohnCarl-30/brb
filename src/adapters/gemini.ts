@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path';
 import { oneLine } from '../text';
 import type { Session, SessionEvent } from '../types';
-import { ERROR_MAX, OUTPUT_KEEP_CHARS, TITLE_MAX,isSummaryCwd, listFolder, readText, recentFiles, str, textOf } from './files';
+import { ERROR_MAX, OUTPUT_KEEP_CHARS, TITLE_MAX,isBackgroundCwd, listFolder, readText, recentFiles, str, textOf } from './files';
 import type { RecentFile } from './files';
 
 // The tools that write a file. A call to one that succeeded is an edit.
@@ -107,7 +107,7 @@ async function readProject(folder: string, sinceMs: number): Promise<Session[]> 
   const files = await recentFiles(join(folder, 'chats'), /^session-.*\.json$/, sinceMs, 1);
   if (files.length === 0) return []; // nothing recent, so there is no need to ask where the project lives
   const cwd = (await readText(join(folder, '.project_root')))?.trim();
-  if (!cwd || isSummaryCwd(cwd)) return []; // a project that never said where it lives, or one of brb's own summary runs
+  if (!cwd || isBackgroundCwd(cwd)) return []; // a project that never said where it lives, or one of brb's own summary runs
   const sessions = await Promise.all(files.map((file) => readSession(file, cwd)));
   return sessions.filter((s): s is Session => s !== null);
 }

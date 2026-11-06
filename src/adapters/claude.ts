@@ -1,7 +1,7 @@
 import { basename, join } from 'node:path';
 import { oneLine } from '../text';
 import type { Session, SessionEvent } from '../types';
-import { OUTPUT_KEEP_CHARS, TITLE_MAX, isSummaryCwd, parseJsonLines, readHeadTail, recentFiles, str } from './files';
+import { OUTPUT_KEEP_CHARS, TITLE_MAX, isBackgroundCwd, parseJsonLines, readHeadTail, recentFiles, str } from './files';
 import type { RecentFile } from './files';
 
 const INTERRUPT_PREFIX = '[Request interrupted by user';
@@ -132,7 +132,7 @@ async function readSession(file: RecentFile): Promise<Session | null> {
   for (const line of parseJsonLines(headLines)) addLine(t, line, false);
   if (tailStart !== null) for (const line of parseJsonLines(lines.slice(tailStart))) addLine(t, line, true);
 
-  if (t.cwd === undefined || isSummaryCwd(t.cwd)) return null;
+  if (t.cwd === undefined || isBackgroundCwd(t.cwd)) return null;
   addUnansweredAsks(t, tailStart !== null);
   t.events.sort((a, b) => a.at - b.at); // stable, so events with the same time keep the order they were written in
 
