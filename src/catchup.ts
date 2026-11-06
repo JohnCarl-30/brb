@@ -69,11 +69,11 @@ export function buildCatchUp(input: CatchUpInput): CatchUp {
   const hereProject = projectFor(input.cwd);
 
   // Your last message per project. The window is per project, and not "since the last commit" because agents commit as you.
+  // Not your uncommitted edits either: shell-command edits by agents land in "yours" too.
   const lastSeen = new Map<string, number>();
   const see = (key: string, at: number) => { if (at > (lastSeen.get(key) ?? -Infinity)) lastSeen.set(key, at); };
   for (const s of sessions) for (const e of s.events) if (e.kind === 'user') see(projectFor(s.cwd).key, e.at);
   const lastUserAnywhere = lastSeen.size > 0 ? Math.max(...lastSeen.values()) : undefined;
-  for (const c of git?.yours ?? []) see(hereProject.key, c.mtimeMs); // your own edits here count as being back at the keyboard
 
   const windowStart = (key: string): number => (input.sinceMs !== undefined ? now - input.sinceMs : (lastSeen.get(key) ?? now - FIRST_RUN_MS));
   const seenHere = lastSeen.get(hereProject.key) ?? lastUserAnywhere;

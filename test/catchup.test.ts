@@ -60,9 +60,12 @@ test('measures time away from your last message in this project', () => {
   expect(buildCatchUp(input()).awayMs).toBe(47 * 60_000);
 });
 
-test('your own newer edit shortens the time away', () => {
-  const yours = [change('src/cart.ts', 10)];
-  expect(buildCatchUp(input({ git: { root: SHOP, branch: 'main', yours, todos: [] } })).awayMs).toBe(600_000);
+// "yours" also holds files an agent changed through a shell command (formatters, sed -i, codegen), so it can't say you were back.
+test("your own edit doesn't move the window", () => {
+  const talk = session({ id: 'talk', tool: 'claude', cwd: SHOP, events: [user(59), agent(40, 'Done.'), turnEnd(40)] });
+  const c = buildCatchUp(input({ sessions: [talk], git: { root: SHOP, branch: 'main', yours: [change('src/cart.ts', 30)], todos: [] } }));
+  expect(c.awayMs).toBe(59 * 60_000);
+  expect(hereIds(c)).toEqual(['talk']);
 });
 
 test('shows a waiting session from before the window', () => {
