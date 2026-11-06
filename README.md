@@ -2,7 +2,7 @@
 
 Step away from your AI coding sessions. When you're back, `brb` shows you everything that moved in one screen.
 
-![brb demo](docs/demo.gif)
+![brb demo](https://raw.githubusercontent.com/JohnCarl-30/brb/main/docs/demo.gif)
 
 ## Run it
 
