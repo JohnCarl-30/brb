@@ -133,7 +133,10 @@ export function parseJsonLines(lines: string[]): any[] {
   return objects;
 }
 
-// brb's own AI summaries run inside <tmpdir>/brb-summaries, and those sessions must never show up as work.
-export function isSummaryCwd(cwd: string): boolean {
-  return basename(cwd) === 'brb-summaries';
+// Folders that only background agents run in, so their sessions are never the human's work: brb's own AI summaries
+// (<tmpdir>/brb-summaries) and the claude-mem plugin's observer (~/.claude-mem/observer-sessions).
+const BACKGROUND_FOLDERS = new Set(['brb-summaries', 'observer-sessions']);
+
+export function isBackgroundCwd(cwd: string): boolean {
+  return BACKGROUND_FOLDERS.has(basename(cwd));
 }

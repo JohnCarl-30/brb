@@ -1,7 +1,7 @@
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { oneLine } from '../text';
 import type { Session, SessionEvent } from '../types';
-import { ERROR_MAX, OUTPUT_KEEP_CHARS, TITLE_MAX, isSummaryCwd, parseJsonLines, readText, recentFiles, str, textOf } from './files';
+import { ERROR_MAX, OUTPUT_KEEP_CHARS, TITLE_MAX, isBackgroundCwd, parseJsonLines, readText, recentFiles, str, textOf } from './files';
 import type { RecentFile } from './files';
 
 // A rollout is named rollout-<time>-<session id>.jsonl, and the id is a UUID.
@@ -133,7 +133,7 @@ async function readSession(file: RecentFile, titles: Map<string, string>): Promi
 
   // The id in the file name is the session's own. The first session_meta is the fallback: a file can hold more than one.
   const id = ID_IN_FILE_NAME.exec(basename(file.path))?.[1] ?? t.id;
-  if (id === undefined || t.cwd === undefined || isSummaryCwd(t.cwd)) return null;
+  if (id === undefined || t.cwd === undefined || isBackgroundCwd(t.cwd)) return null;
   t.events.sort((a, b) => a.at - b.at); // stable, so events with the same time keep the order they were written in
 
   return {

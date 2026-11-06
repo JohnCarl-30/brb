@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'vitest';
-import { ERROR_MAX, HEAD_BYTES, OUTPUT_KEEP_CHARS, SCAN_MS, TAIL_BYTES, TITLE_MAX, isMissing, isSummaryCwd, parseJsonLines, readHeadTail, readText, recentFiles, str, textOf } from '../../src/adapters/files';
+import { ERROR_MAX, HEAD_BYTES, OUTPUT_KEEP_CHARS, SCAN_MS, TAIL_BYTES, TITLE_MAX, isMissing, isBackgroundCwd, parseJsonLines, readHeadTail, readText, recentFiles, str, textOf } from '../../src/adapters/files';
 
 let dir: string;
 beforeEach(() => {
@@ -178,13 +178,14 @@ test('parseJsonLines drops lines that are not JSON objects', () => {
   expect(parseJsonLines(lines)).toEqual([{ a: 1 }, { c: 3 }]);
 });
 
-// isSummaryCwd
+// isBackgroundCwd
 
-test('isSummaryCwd recognises brb summary folders by their last segment', () => {
-  expect(isSummaryCwd('/tmp/brb-summaries')).toBe(true);
-  expect(isSummaryCwd('/var/folders/x/T/brb-summaries/')).toBe(true);
-  expect(isSummaryCwd('/w/app')).toBe(false);
-  expect(isSummaryCwd('/w/brb-summaries/app')).toBe(false);
-  expect(isSummaryCwd('/w/brb-summaries-old')).toBe(false);
-  expect(isSummaryCwd('/w/old-brb-summaries')).toBe(false);
+test('isBackgroundCwd recognises background agent folders by their last segment', () => {
+  expect(isBackgroundCwd('/Users/me/.claude-mem/observer-sessions')).toBe(true);
+  expect(isBackgroundCwd('/tmp/brb-summaries')).toBe(true);
+  expect(isBackgroundCwd('/var/folders/x/T/brb-summaries/')).toBe(true);
+  expect(isBackgroundCwd('/w/app')).toBe(false);
+  expect(isBackgroundCwd('/w/brb-summaries/app')).toBe(false);
+  expect(isBackgroundCwd('/w/brb-summaries-old')).toBe(false);
+  expect(isBackgroundCwd('/w/old-brb-summaries')).toBe(false);
 });

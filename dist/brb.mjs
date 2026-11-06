@@ -104,7 +104,7 @@ import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 
 // package.json
-var version = "0.1.0";
+var version = "0.1.1";
 
 // src/adapters/index.ts
 import * as os from "os";
@@ -248,8 +248,9 @@ function parseJsonLines(lines) {
   }
   return objects;
 }
-function isSummaryCwd(cwd) {
-  return basename(cwd) === "brb-summaries";
+var BACKGROUND_FOLDERS = /* @__PURE__ */ new Set(["brb-summaries", "observer-sessions"]);
+function isBackgroundCwd(cwd) {
+  return BACKGROUND_FOLDERS.has(basename(cwd));
 }
 
 // src/adapters/claude.ts
@@ -344,7 +345,7 @@ async function readSession(file) {
   const headLines = tailStart === null ? lines : lines.slice(0, tailStart);
   for (const line of parseJsonLines(headLines)) addLine(t, line, false);
   if (tailStart !== null) for (const line of parseJsonLines(lines.slice(tailStart))) addLine(t, line, true);
-  if (t.cwd === void 0 || isSummaryCwd(t.cwd)) return null;
+  if (t.cwd === void 0 || isBackgroundCwd(t.cwd)) return null;
   addUnansweredAsks(t, tailStart !== null);
   t.events.sort((a, b) => a.at - b.at);
   const session = {
@@ -447,7 +448,7 @@ async function readSession2(file, titles) {
   const t = { events: [], hasItems: lines.some(isReadItem), begun: /* @__PURE__ */ new Map() };
   for (const line of lines) addLine2(t, line);
   const id = ID_IN_FILE_NAME.exec(basename3(file.path))?.[1] ?? t.id;
-  if (id === void 0 || t.cwd === void 0 || isSummaryCwd(t.cwd)) return null;
+  if (id === void 0 || t.cwd === void 0 || isBackgroundCwd(t.cwd)) return null;
   t.events.sort((a, b) => a.at - b.at);
   return {
     tool: "codex",
@@ -551,7 +552,7 @@ async function readProject(folder, sinceMs) {
   const files = await recentFiles(join4(folder, "chats"), /^session-.*\.json$/, sinceMs, 1);
   if (files.length === 0) return [];
   const cwd = (await readText(join4(folder, ".project_root")))?.trim();
-  if (!cwd || isSummaryCwd(cwd)) return [];
+  if (!cwd || isBackgroundCwd(cwd)) return [];
   const sessions = await Promise.all(files.map((file) => readSession3(file, cwd)));
   return sessions.filter((s) => s !== null);
 }
