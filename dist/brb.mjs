@@ -1090,7 +1090,7 @@ var SUMMARY_WIDTH = 60;
 var QUOTES = /^["'`“”‘’]+|["'`“”‘’]+$/g;
 function commandFor(tool, prompt) {
   if (tool === "claude") return { bin: "claude", args: ["-p", "--model", "haiku", "--no-session-persistence", prompt] };
-  if (tool === "codex") return { bin: "codex", args: ["exec", "--skip-git-repo-check", prompt] };
+  if (tool === "codex") return { bin: "codex", args: ["exec", "--skip-git-repo-check", "--ephemeral", prompt] };
   return { bin: "gemini", args: ["-p", prompt] };
 }
 var summaryKey = (r) => `${r.tool}:${r.sessionId}:${r.at}`;
@@ -1107,6 +1107,16 @@ function reply(stdout) {
   const last = stdout.split("\n").map((l) => l.trim()).filter(Boolean).at(-1) ?? "";
   return oneLine(last.replace(QUOTES, ""), SUMMARY_WIDTH);
 }
+function privateFolder(dir) {
+  try {
+    fs4.mkdirSync(dir, { recursive: true, mode: 448 });
+    if (process.platform === "win32") return true;
+    const st = fs4.lstatSync(dir);
+    return st.isDirectory() && st.uid === process.getuid() && (st.mode & 63) === 0;
+  } catch {
+    return false;
+  }
+}
 async function summarizeRows(rows, o) {
   const jobs = rows.filter((r) => r.status === "finished" || r.status === "failed").slice(0, MAX_JOBS);
   const file = path7.join(o.brbHome, "cache", "summaries.json");
@@ -1120,8 +1130,8 @@ async function summarizeRows(rows, o) {
     else if (o.which(commandFor(r.tool, "").bin)) todo.push(r);
   }
   if (todo.length === 0) return result;
-  const cwd = path7.join(os3.tmpdir(), "brb-summaries");
-  fs4.mkdirSync(cwd, { recursive: true });
+  const cwd = path7.join(o.tmpDir ?? os3.tmpdir(), "brb-summaries");
+  if (!privateFolder(cwd)) return result;
   const env = { ...o.env, BRB_INTERNAL: "1" };
   await Promise.all(todo.map(async (r) => {
     try {
@@ -1225,12 +1235,13 @@ async function run(o) {
   const stdout = renderTerminal(c, view);
   if (!o.isTTY || values["no-ai"] || o.env.BRB_NO_AI === "1") return { stdout, exitCode: 0 };
   const rerender = async () => {
-    const rows = [...c.here?.rows ?? [], ...c.elsewhere];
+    const rows = [...c.here?.rows ?? [], ...view.all ? c.elsewhere : []];
     const summaries = await summarizeRows(rows, {
       brbHome: resolveRoots(o.env).brb,
       env: o.env,
       runner: o.runner ?? defaultRunner,
-      which: o.which ?? ((bin) => onPath(bin, o.env))
+      which: o.which ?? ((bin) => onPath(bin, o.env)),
+      tmpDir: o.tmpDir
     });
     if (summaries.size === 0) return null;
     for (const r of rows) r.summary = summaries.get(summaryKey(r));

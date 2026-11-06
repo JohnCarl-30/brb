@@ -29,15 +29,20 @@ const row = (tool: Tool, status: Status, over: Partial<Row> = {}): Row => ({
   cwd: PROJECT.key, files: [], resume: `${tool} resume`, longText: `${tool} long text`, ...over,
 });
 
+// A fresh tmp base per test, so nothing here touches the real <os tmpdir>/brb-summaries.
 let brbHome: string;
-beforeEach(() => { brbHome = fs.mkdtempSync(path.join(tmp, 'home-')); });
+let tmpDir: string;
+beforeEach(() => {
+  brbHome = fs.mkdtempSync(path.join(tmp, 'home-'));
+  tmpDir = fs.mkdtempSync(path.join(tmp, 'tmpdir-'));
+});
 const sum = (rows: Row[], runner: Runner, which: (bin: string) => boolean = () => true) =>
-  summarizeRows(rows, { brbHome, env: { MARK: 'x' }, runner, which });
+  summarizeRows(rows, { brbHome, env: { MARK: 'x' }, runner, which, tmpDir });
 
 describe('commandFor', () => {
   test('asks each tool for one non-interactive answer', () => {
     expect(commandFor('claude', 'p')).toEqual({ bin: 'claude', args: ['-p', '--model', 'haiku', '--no-session-persistence', 'p'] });
-    expect(commandFor('codex', 'p')).toEqual({ bin: 'codex', args: ['exec', '--skip-git-repo-check', 'p'] });
+    expect(commandFor('codex', 'p')).toEqual({ bin: 'codex', args: ['exec', '--skip-git-repo-check', '--ephemeral', 'p'] });
     expect(commandFor('gemini', 'p')).toEqual({ bin: 'gemini', args: ['-p', 'p'] });
   });
 });
@@ -170,8 +175,88 @@ describe('summarizeRows', () => {
     expect(call.env.BRB_INTERNAL).toBe('1');
     expect(call.env.MARK).toBe('x'); // the caller's env is kept
     expect(path.basename(call.cwd)).toBe('brb-summaries');
-    expect(path.dirname(call.cwd)).toBe(os.tmpdir());
+    expect(call.cwd).toBe(path.join(tmpDir, 'brb-summaries'));
     expect(call.timeoutMs).toBe(30_000);
+  });
+
+  describe.skipIf(process.platform === 'win32')('the folder the tools run in', () => {
+    const folder = () => path.join(tmpDir, 'brb-summaries');
+
+    test('is created private (0700) when it is new', async () => {
+      const { runner, calls } = fakeRunner();
+      await sum([row('claude', 'finished')], runner);
+      expect(calls).toHaveLength(1);
+      expect(fs.statSync(folder()).mode & 0o777).toBe(0o700);
+    });
+
+    test('is reused when it is ours and private', async () => {
+      fs.mkdirSync(folder(), { mode: 0o700 });
+      const { runner, calls } = fakeRunner();
+      await sum([row('claude', 'finished')], runner);
+      expect(calls).toHaveLength(1);
+    });
+
+    test.each([0o777, 0o770, 0o705, 0o755].map((m) => [m.toString(8), m] as const))('is not used when it has group or other permissions (0%s)', async (_name, mode) => {
+      fs.mkdirSync(folder());
+      fs.chmodSync(folder(), mode);
+      const { runner, calls } = fakeRunner();
+      const map = await sum([row('claude', 'finished'), row('codex', 'failed')], runner);
+      expect(calls).toHaveLength(0);
+      expect(map.size).toBe(0);
+      expect(fs.statSync(folder()).mode & 0o777).toBe(mode); // brb never changes a folder it didn't make
+      expect(fs.existsSync(path.join(brbHome, 'cache', 'summaries.json'))).toBe(false);
+    });
+
+    test('is not used when it is a symlink, even to a private folder', async () => {
+      const real = fs.mkdtempSync(path.join(tmp, 'real-'));
+      fs.symlinkSync(real, folder());
+      const { runner, calls } = fakeRunner();
+      expect((await sum([row('claude', 'finished')], runner)).size).toBe(0);
+      expect(calls).toHaveLength(0);
+      expect(fs.lstatSync(folder()).isSymbolicLink()).toBe(true);
+    });
+
+    test('is not used when it is a dangling symlink or a plain file', async () => {
+      fs.symlinkSync(path.join(tmp, 'nowhere'), folder());
+      const a = fakeRunner();
+      await sum([row('claude', 'finished')], a.runner);
+      fs.rmSync(folder());
+      fs.writeFileSync(folder(), 'not a folder');
+      const b = fakeRunner();
+      await sum([row('claude', 'finished')], b.runner);
+      expect(a.calls.length + b.calls.length).toBe(0);
+      expect(fs.readFileSync(folder(), 'utf8')).toBe('not a folder');
+    });
+
+    test("is not used when it isn't owned by the current user", async () => {
+      fs.mkdirSync(folder(), { mode: 0o700 });
+      vi.spyOn(process, 'getuid').mockReturnValue(process.getuid!() + 1);
+      try {
+        const { runner, calls } = fakeRunner();
+        await sum([row('claude', 'finished')], runner);
+        expect(calls).toHaveLength(0);
+      } finally {
+        vi.restoreAllMocks();
+      }
+    });
+
+    test('still gives cached summaries when it is unsafe', async () => {
+      const rows = [row('claude', 'finished')];
+      const a = await sum(rows, fakeRunner('cached one').runner); // cached while the folder is still fine
+      fs.chmodSync(folder(), 0o777);
+      const { runner, calls } = fakeRunner();
+      const b = await sum([...rows, row('codex', 'failed')], runner);
+      expect(calls).toHaveLength(0);
+      expect(b).toEqual(a); // only the cached one; the codex row got nothing
+    });
+
+    test('is never entered when every summary is already cached', async () => {
+      const rows = [row('claude', 'finished')];
+      await sum(rows, fakeRunner().runner);
+      fs.rmSync(folder(), { recursive: true });
+      await sum(rows, fakeRunner().runner);
+      expect(fs.existsSync(folder())).toBe(false);
+    });
   });
 
   test('runs the sessions in parallel', async () => {
@@ -264,6 +349,7 @@ describe('run', () => {
 
   const brb = (argv: string[], over: { env?: NodeJS.ProcessEnv; isTTY?: boolean; runner?: Runner } = {}) =>
     run({
+      tmpDir: fs.mkdtempSync(path.join(tmp, 'tmpdir-')),
       argv, env: { HOME: world.home, BRB_HOME: fs.mkdtempSync(path.join(tmp, 'brbhome-')), ...over.env }, cwd: world.repo, now: NOW, isTTY: over.isTTY ?? true,
       runner: over.runner ?? fakeRunner('Did the thing.').runner, which: () => true,
     });
@@ -282,18 +368,21 @@ describe('run', () => {
     const result = await brb(['--no-color'], { runner });
     expect(calls).toHaveLength(0); // facts first: nothing runs until rerender is called
     const text = await result.rerender!();
-    expect(calls.map((c) => c.bin).sort()).toEqual(['claude', 'codex', 'gemini']); // HERE: Claude finished, Codex failed; ELSEWHERE: Gemini
+    // Only what is shown: HERE has Claude finished and Codex failed. The ELSEWHERE Gemini row has no detail line without --all, so nothing is sent for it.
+    expect(calls.map((c) => c.bin).sort()).toEqual(['claude', 'codex']);
     expect(text!.split('\n')).toHaveLength(result.stdout.split('\n').length); // same shape, so the redraw lines up
-    expect(text!.match(/Did the thing\./g)).toHaveLength(2); // ELSEWHERE shows no detail line without --all
+    expect(text!.match(/Did the thing\./g)).toHaveLength(2);
     expect(text).toContain('asks: "Round per item or on the total?"'); // the waiting session keeps its facts
     expect(text).not.toContain('Added 6 tests, all passing.');
   });
 
   test('uses the same options as the first screen', async () => {
-    const result = await brb(['--no-color', '--all']);
+    const { runner, calls } = fakeRunner('Did the thing.');
+    const result = await brb(['--no-color', '--all'], { runner });
     const text = (await result.rerender!())!;
     expect(text).toContain('→ claude --resume'); // --all
-    expect(text.match(/Did the thing\./g)).toHaveLength(3); // so ELSEWHERE shows its summary too
+    expect(calls.map((c) => c.bin).sort()).toEqual(['claude', 'codex', 'gemini']); // with --all the ELSEWHERE row shows its detail, so it is summarized too
+    expect(text.match(/Did the thing\./g)).toHaveLength(3);
     expect(text).not.toContain('\x1b[');
   });
 

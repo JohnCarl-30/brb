@@ -17,10 +17,10 @@ const TIMEOUT_MS = 30_000;
 const SUMMARY_WIDTH = 60;
 const QUOTES = /^["'`“”‘’]+|["'`“”‘’]+$/g;
 
-// Each tool answers one non-interactive question. --no-session-persistence keeps brb's own run out of the user's Claude history.
+// Each tool answers one non-interactive question. --no-session-persistence and --ephemeral keep brb's own run out of the user's Claude and Codex history.
 export function commandFor(tool: Tool, prompt: string): { bin: string; args: string[] } {
   if (tool === 'claude') return { bin: 'claude', args: ['-p', '--model', 'haiku', '--no-session-persistence', prompt] };
-  if (tool === 'codex') return { bin: 'codex', args: ['exec', '--skip-git-repo-check', prompt] };
+  if (tool === 'codex') return { bin: 'codex', args: ['exec', '--skip-git-repo-check', '--ephemeral', prompt] };
   return { bin: 'gemini', args: ['-p', prompt] };
 }
 
@@ -42,10 +42,24 @@ function reply(stdout: string): string {
   return oneLine(last.replace(QUOTES, ''), SUMMARY_WIDTH);
 }
 
+// The folder's name is fixed (the adapters skip sessions that ran in it), so on a shared /tmp someone else could plant project
+// config in it (hooks, GEMINI.md) that the user's agentic tools would then obey. Only use a folder that is ours and private.
+// Never chmod or delete one that brb didn't make: an unsafe folder just means no AI.
+function privateFolder(dir: string): boolean {
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (process.platform === 'win32') return true; // no owner or mode bits to check there
+    const st = fs.lstatSync(dir); // lstat, so a symlink is not a directory
+    return st.isDirectory() && st.uid === process.getuid!() && (st.mode & 0o077) === 0;
+  } catch {
+    return false;
+  }
+}
+
 // Rows come in display order (HERE first). A session's text goes only to the tool it came from, and only if that tool is installed.
 export async function summarizeRows(
   rows: Row[],
-  o: { brbHome: string; env: NodeJS.ProcessEnv; runner: Runner; which: (bin: string) => boolean },
+  o: { brbHome: string; env: NodeJS.ProcessEnv; runner: Runner; which: (bin: string) => boolean; tmpDir?: string },
 ): Promise<Map<string, string>> {
   const jobs = rows.filter((r) => r.status === 'finished' || r.status === 'failed').slice(0, MAX_JOBS);
   const file = path.join(o.brbHome, 'cache', 'summaries.json');
@@ -61,8 +75,8 @@ export async function summarizeRows(
   if (todo.length === 0) return result;
 
   // brb's own runs happen here, where the adapters skip them, with BRB_INTERNAL so the Claude hooks stay silent.
-  const cwd = path.join(os.tmpdir(), 'brb-summaries');
-  fs.mkdirSync(cwd, { recursive: true });
+  const cwd = path.join(o.tmpDir ?? os.tmpdir(), 'brb-summaries');
+  if (!privateFolder(cwd)) return result;
   const env = { ...o.env, BRB_INTERNAL: '1' };
   await Promise.all(todo.map(async (r) => {
     try {

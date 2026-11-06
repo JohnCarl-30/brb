@@ -26,8 +26,8 @@ Usage: brb [options]
 brb reads your local Claude Code, Codex and Gemini CLI history. No API key.
 `;
 
-// `runner` and `which` let tests stand in for the AI tools; `stdin` is for `brb hook`.
-export interface RunOptions { argv: string[]; env: NodeJS.ProcessEnv; cwd: string; now: number; isTTY: boolean; columns?: number; stdin?: string; runner?: Runner; which?: (bin: string) => boolean }
+// `runner`, `which` and `tmpDir` let tests stand in for the AI tools and keep off the real tmp folder; `stdin` is for `brb hook`.
+export interface RunOptions { argv: string[]; env: NodeJS.ProcessEnv; cwd: string; now: number; isTTY: boolean; columns?: number; stdin?: string; runner?: Runner; which?: (bin: string) => boolean; tmpDir?: string }
 export interface RunResult { stdout: string; exitCode: number; rerender?: () => Promise<string | null> }
 
 const fail = (message: string): RunResult => ({ stdout: `brb: ${message}\nRun brb --help for usage.\n`, exitCode: 1 });
@@ -68,9 +68,11 @@ export async function run(o: RunOptions): Promise<RunResult> {
 
   // The facts above print first; the caller asks for this afterwards, so AI never delays them.
   const rerender = async (): Promise<string | null> => {
-    const rows = [...(c.here?.rows ?? []), ...c.elsewhere];
+    // Only rows whose detail line is on screen: HERE always, ELSEWHERE with --all.
+    const rows = [...(c.here?.rows ?? []), ...(view.all ? c.elsewhere : [])];
     const summaries = await summarizeRows(rows, {
       brbHome: resolveRoots(o.env).brb, env: o.env, runner: o.runner ?? defaultRunner, which: o.which ?? ((bin) => onPath(bin, o.env)),
+      tmpDir: o.tmpDir,
     });
     if (summaries.size === 0) return null;
     for (const r of rows) r.summary = summaries.get(summaryKey(r));
