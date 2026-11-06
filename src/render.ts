@@ -15,9 +15,20 @@ const LABEL: Record<Status, (age: string) => string> = {
 const TITLE_WIDTH = 26;
 const LONG = 300;        // for session or disk text the layout gives no width: still one clean line
 const BRIEF_ROWS = 7;
+const MAX_ELSEWHERE = 10;
 const BRIEF_FILES = 5;
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+const needsYou = (r: Row): boolean => r.status === 'waiting' || r.status === 'failed' || r.status === 'working';
+
+// The ELSEWHERE rows on screen, in order, which are also the ones `brb <n>` numbers. Without --all: every session that
+// needs you or is working, then the newest of the rest up to MAX_ELSEWHERE rows in all.
+export function shownElsewhere(c: CatchUp, all: boolean): Row[] {
+  if (all) return c.elsewhere;
+  let room = MAX_ELSEWHERE - c.elsewhere.filter(needsYou).length;
+  return c.elsewhere.filter((r) => needsYou(r) || room-- > 0);
+}
 
 // Everything printed that came from a session or the disk goes through oneLine (or commandText for commands): no escape codes, CR or newlines.
 // `numbered: false` drops the row numbers, for a list that leaves a session out and so wouldn't match `brb <n>`.
@@ -25,9 +36,10 @@ export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number;
   const k = pc.createColors(o.color);
   const tint: Record<Status, (s: string) => string> = { waiting: k.yellow, finished: k.green, failed: k.red, working: k.cyan, idle: k.dim };
   const rows = (c.here?.rows.length ?? 0) + c.elsewhere.length;
+  const elsewhere = shownElsewhere(c, o.all);
   // Every session row gets its number for `brb <n>`, so all rows shift right by the widest number and a space.
   const numbered = o.numbered !== false;
-  const numberWidth = numbered ? String(rows).length : 0;
+  const numberWidth = numbered ? String((c.here?.rows.length ?? 0) + elsewhere.length).length : 0;
   const shift = numbered ? ' '.repeat(numberWidth + 1) : '';
   const DETAIL_INDENT = shift + ' '.repeat(11);
   const detailWidth = Math.max(20, o.columns - 12 - shift.length);
@@ -68,7 +80,8 @@ export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number;
   if (c.elsewhere.length > 0) {
     sections.push([
       k.dim(c.here ? ' ELSEWHERE' : ' EVERYWHERE'),
-      ...c.elsewhere.flatMap((r) => sessionLines(r, `${r.project.name} · ${r.title}`, o.all)),
+      ...elsewhere.flatMap((r) => sessionLines(r, `${r.project.name} · ${r.title}`, o.all)),
+      ...(elsewhere.length < c.elsewhere.length ? [k.dim(`${shift} +${c.elsewhere.length - elsewhere.length} more · brb --all shows every session`)] : []),
     ]);
   }
 

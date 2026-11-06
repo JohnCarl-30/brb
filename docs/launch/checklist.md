@@ -4,9 +4,10 @@ Everything here is for the owner. Nothing in this repo posts, publishes or opens
 
 ## Before launch day
 
-- [ ] The repo is public and `docs/demo.gif` shows in the README.
-- [ ] `@john_carl/brb` is published to npm, and `npx @john_carl/brb` works on a machine that has never seen it.
-- [ ] `/plugin marketplace add JohnCarl-30/brb` and `/plugin install brb@brb` work in a fresh Claude Code.
+- [x] The repo is public and `docs/demo.gif` shows in the README.
+- [x] `@john_carl/brb` is published to npm, and `npx @john_carl/brb` works on a machine that has never seen it.
+- [x] `/plugin marketplace add JohnCarl-30/brb` and `/plugin install brb@brb` work in a fresh Claude Code.
+- [ ] Publish the version with the new GIF, so the npm page shows the current README.
 - [ ] Verify each awesome list below exists and read its contributing rules first.
 - [ ] Open the awesome-list pull requests:
   - [ ] `hesreallyhim/awesome-claude-code`
