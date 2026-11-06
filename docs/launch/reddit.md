@@ -23,7 +23,7 @@ The plugin adds three things:
 
 Install: /plugin marketplace add JohnCarl-30/brb, then /plugin install brb@brb. It needs Node 20 or newer.
 
-It reads local files only and makes no network calls of its own. No API key. Without the plugin, npx brb works from any terminal.
+It reads local files only and makes no network calls of its own. No API key. Without the plugin, npx @john_carl/brb works from any terminal.
 
 https://github.com/JohnCarl-30/brb
 ```
@@ -41,11 +41,11 @@ Body:
 ```
 If you run more than one AI coding tool, coming back to your desk means opening each one to find out what happened. brb reads the local session history of Claude Code, Codex CLI and Gemini CLI and prints a single catch-up: what is waiting on you, what finished, what stopped on an error, what you changed yourself, and the exact commands for your next steps.
 
-npx brb. No install, no API key, no config.
+npx @john_carl/brb. No install, no API key, no config.
 
 It reads local files only and makes no network calls of its own. If you have an AI CLI installed it can ask that tool for a one-line summary of its own sessions, and a session's text never goes to a different tool. --no-ai turns that off.
 
-Codex and Gemini are detected for questions they asked. Claude Code also gets plans and permission prompts, with the plugin. To brief a Codex or Gemini agent, add "Run `npx brb --brief` before starting a task" to AGENTS.md or GEMINI.md. Cursor support is planned for v1.1.
+Codex and Gemini are detected for questions they asked. Claude Code also gets plans and permission prompts, with the plugin. To brief a Codex or Gemini agent, add "Run `npx @john_carl/brb --brief` before starting a task" to AGENTS.md or GEMINI.md. Cursor support is planned for v1.1.
 
 https://github.com/JohnCarl-30/brb
 ```
