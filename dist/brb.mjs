@@ -101,11 +101,12 @@ var require_picocolors = __commonJS({
 // src/cli.ts
 var import_picocolors2 = __toESM(require_picocolors(), 1);
 import { spawnSync } from "child_process";
+import { createInterface } from "readline/promises";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 
 // package.json
-var version = "0.2.0";
+var version = "0.3.0";
 
 // src/adapters/index.ts
 import * as os from "os";
@@ -1257,7 +1258,9 @@ async function run(o) {
   const color = !values["no-color"] && o.isTTY && !("NO_COLOR" in o.env);
   const view = { color, columns: o.columns ?? 100, all: values.all ?? false, numbered: values.exclude === void 0 };
   const stdout = renderTerminal(c, view);
-  if (!o.isTTY || values["no-ai"] || o.env.BRB_NO_AI === "1") return { stdout, exitCode: 0 };
+  const listed = [...c.here?.rows ?? [], ...c.elsewhere];
+  const choices = o.isTTY && view.numbered && listed.length > 0 ? listed.map((r) => r.resume) : void 0;
+  if (!o.isTTY || values["no-ai"] || o.env.BRB_NO_AI === "1") return { stdout, exitCode: 0, choices };
   const rerender = async () => {
     const rows = [...c.here?.rows ?? [], ...view.all ? c.elsewhere : []];
     const summaries = await summarizeRows(rows, {
@@ -1271,11 +1274,36 @@ async function run(o) {
     for (const r of rows) r.summary = summaries.get(summaryKey(r));
     return renderTerminal(c, view);
   };
-  return { stdout, exitCode: 0, rerender, pending: import_picocolors2.default.createColors(color).dim("summarizing\u2026 (Ctrl-C to skip)") };
+  return { stdout, exitCode: 0, rerender, choices, pending: import_picocolors2.default.createColors(color).dim("summarizing\u2026 (Ctrl-C to skip)") };
 }
-function redraw(shown, next, rows) {
-  const lines = shown.split("\n").length;
+function redraw(shown, next, rows, columns = Infinity) {
+  const width = (line) => line.replace(/\x1b\[[0-9;]*m/g, "").length;
+  const lines = shown.split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(width(line) / columns)), 0);
   return next !== null && lines < rows ? `\x1B[${lines}F\x1B[0J${next}` : "\x1B[1F\x1B[0J";
+}
+function parsePick(answer, count) {
+  const a = answer.trim().toLowerCase();
+  if (a === "" || a === "q") return "quit";
+  const n = /^\d+$/.test(a) ? Number(a) : 0;
+  return n >= 1 && n <= count ? n : "again";
+}
+async function askPick(choices) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const cancel = new AbortController();
+  rl.on("SIGINT", () => rl.close());
+  rl.on("close", () => cancel.abort());
+  try {
+    for (; ; ) {
+      const answer = await rl.question(import_picocolors2.default.dim(`Pick a session (1-${choices.length}), Enter to quit: `), { signal: cancel.signal });
+      const pick = parsePick(answer, choices.length);
+      if (pick === "quit") return void 0;
+      if (pick !== "again") return choices[pick - 1];
+    }
+  } catch {
+    return void 0;
+  } finally {
+    rl.close();
+  }
 }
 async function readStdin() {
   if (process.stdin.isTTY) return "";
@@ -1297,17 +1325,25 @@ async function main() {
     });
     process.stdout.write(result.stdout);
     process.exitCode = result.exitCode;
-    if (result.exec) process.exitCode = spawnSync("/bin/sh", ["-c", result.exec], { stdio: "inherit" }).status ?? 1;
     if (result.rerender) {
       process.stdout.write(`${result.pending}
 `);
-      process.once("SIGINT", () => {
+      const skip = () => {
         process.stdout.write(redraw(result.stdout, null, 0));
         process.exit();
-      });
+      };
+      process.once("SIGINT", skip);
       const next = await result.rerender().catch(() => null);
-      process.stdout.write(redraw(result.stdout, next, process.stdout.rows ?? 0));
+      process.off("SIGINT", skip);
+      process.stdout.write(redraw(result.stdout, next, process.stdout.rows ?? 0, process.stdout.columns));
     }
+    let command = result.exec;
+    if (result.choices && process.stdin.isTTY) {
+      command = await askPick(result.choices);
+      if (command) process.stdout.write(`\u2192 ${commandText(command)}
+`);
+    }
+    if (command) process.exitCode = spawnSync("/bin/sh", ["-c", command], { stdio: "inherit" }).status ?? 1;
   } catch (err) {
     if (argv[0] !== "hook") throw err;
   }
@@ -1315,6 +1351,7 @@ async function main() {
 if (process.argv[1] && realpath(process.argv[1]) === realpath(fileURLToPath(import.meta.url))) await main();
 export {
   HELP,
+  parsePick,
   redraw,
   run
 };
