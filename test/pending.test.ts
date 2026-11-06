@@ -51,11 +51,13 @@ test('ignores a marker it cannot read', () => {
   expect([...readPermissionRequests(brb, NOW).keys()]).toEqual(['good']);
 });
 
-test('keeps a session id from leaving the pending folder', () => {
+test('writes nothing for a session id that holds a path', () => {
   const brb = path.join(tmp, 'escape', '.brb');
+  fs.mkdirSync(brb, { recursive: true }); // so an id that climbs out of pending/ has somewhere to land
+  // 'claude-x/../../escaped.json' resolves to <brb>/escaped.json, outside pending/ (a leading '../' would stay inside it).
+  recordPermissionRequest(brb, 'x/../../escaped', 'x', NOW);
   recordPermissionRequest(brb, '../../evil', 'x', NOW);
-  expect(fs.existsSync(path.join(tmp, 'escape', 'evil.json'))).toBe(false);
-  expect(readPermissionRequests(brb, NOW).size).toBe(0);
+  expect(fs.readdirSync(brb)).toEqual([]); // not even pending/ was made
 });
 
 test('a fresh permission request turns a session into waiting', async () => {
