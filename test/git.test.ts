@@ -169,3 +169,37 @@ test('skips untracked files over 1 MB when looking for TODOs', () => {
 
   expect(addedTodos(root, ['big.txt'])).toEqual([]);
 });
+
+test('does not read untracked files over 1 MB to count their lines', () => {
+  const root = newRepo();
+  write(root, 'a.ts', 'one\n');
+  commitAll(root);
+  write(root, 'dump.txt', 'x\n'.repeat(600_000));
+
+  expect(readGit(root)?.changes).toMatchObject([{ file: 'dump.txt', added: 0, removed: 0 }]);
+});
+
+test('finds TODOs in files with CRLF line endings', () => {
+  const root = newRepo();
+  write(root, 'tracked.ts', 'one\r\ntwo\r\n');
+  commitAll(root);
+  fs.appendFileSync(path.join(root, 'tracked.ts'), '// TODO: fix it\r\n');
+  write(root, 'untracked.ts', 'a\r\n// FIXME: and this\r\n');
+
+  expect(addedTodos(root, ['tracked.ts', 'untracked.ts'])).toEqual([
+    { file: 'tracked.ts', line: 3, text: 'fix it' },
+    { file: 'untracked.ts', line: 2, text: 'and this' },
+  ]);
+});
+
+test('still finds TODOs when a file in the same diff is larger than the default 1 MB output buffer', () => {
+  const root = newRepo();
+  write(root, 'big.txt', 'x\n');
+  write(root, 'a.ts', 'one\n');
+  commitAll(root);
+  write(root, 'big.txt', 'y'.repeat(100) + '\n' + ('z'.repeat(99) + '\n').repeat(15_000)); // about 1.5 MB of added lines
+  fs.appendFileSync(path.join(root, 'a.ts'), '// TODO: survive a big diff\n');
+
+  expect(addedTodos(root, ['a.ts', 'big.txt'])).toEqual([{ file: 'a.ts', line: 2, text: 'survive a big diff' }]);
+  expect(readGit(root)?.changes.map((c) => c.file)).toEqual(['a.ts', 'big.txt']);
+});

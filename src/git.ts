@@ -8,6 +8,7 @@ export interface Todo { file: string; line: number; text: string }
 export interface GitSnapshot { root: string; branch: string | null; changes: Change[] }
 
 const MAX_SCAN_BYTES = 1_000_000;
+const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
 const TODO = /\b(?:TODO|FIXME)\b[:\s-]*(.*)$/;
 // Pinned so the owner's git config (colors, path prefixes, quoting, external diff tools) can't change what we parse.
 // shortcut: a path with a tab, quote, backslash or newline in its name is still quoted by git, so its TODOs are missed. Unquote if that ever matters.
@@ -16,7 +17,8 @@ const PATCH = ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-dif
 // Read-only: only rev-parse, status, diff and ls-files. Null when the command fails (not a repo, no HEAD yet, git missing).
 function git(cwd: string, args: string[]): string | null {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    // maxBuffer: the 1 MB default would throw on one big diff (a regenerated lockfile) and drop every result.
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: MAX_GIT_OUTPUT });
   } catch {
     return null;
   }
@@ -78,7 +80,8 @@ export function readGit(cwd: string): GitSnapshot | null {
       continue; // gone since git looked
     }
     if (!stat.isFile()) continue; // a submodule or a nested repo
-    const [added, removed] = hasHead && !untracked ? (counts.get(file) ?? [0, 0]) : [countLines(abs), 0];
+    // shortcut: an untracked file over 1 MB counts 0 lines, so a stray dump or video is never read. Count bytes instead if that ever matters.
+    const [added, removed] = hasHead && !untracked ? (counts.get(file) ?? [0, 0]) : [stat.size > MAX_SCAN_BYTES ? 0 : countLines(abs), 0];
     changes.push({ file, added, removed, mtimeMs: stat.mtimeMs });
   }
   changes.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
@@ -86,7 +89,7 @@ export function readGit(cwd: string): GitSnapshot | null {
 }
 
 const todosIn = (file: string, line: number, text: string): Todo[] => {
-  const match = TODO.exec(text);
+  const match = TODO.exec(text.replace(/\r$/, '')); // `.` doesn't match the \r of a CRLF line
   return match ? [{ file, line, text: oneLine(match[1], 60) }] : [];
 };
 
