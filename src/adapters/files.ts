@@ -1,4 +1,4 @@
-import { open, readdir, stat } from 'node:fs/promises';
+import { open, readdir, readFile, stat } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
@@ -10,7 +10,8 @@ export const TAIL_BYTES = 65_536;
 
 export interface RecentFile { path: string; mtimeMs: number }
 
-const isMissing = (error: unknown): boolean => (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
+// Whether a read failed because the file or folder isn't there (it was removed, or the tool isn't installed).
+export const isMissing = (error: unknown): boolean => (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 
 async function listFolder(folder: string) {
   try {
@@ -85,6 +86,17 @@ export async function readHeadTail(path: string): Promise<{ lines: string[]; tai
     return { lines: [...head, ...tail], tailStart: head.length };
   } finally {
     await handle.close();
+  }
+}
+
+// A whole file's text, for a tool whose files are small. A file that was removed after it was listed gives null;
+// any other error throws.
+export async function readText(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, 'utf8');
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw error;
   }
 }
 

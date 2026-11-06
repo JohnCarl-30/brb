@@ -74,19 +74,28 @@ export function writeClaudeSession(
 
 const item = (at: number, it: object) => ({ timestamp: iso(at), type: 'event_msg', payload: { type: 'item_completed', item: it } });
 const ev = (at: number, payload: object) => ({ timestamp: iso(at), type: 'event_msg', payload });
+const changesOf = (paths: string[]) => Object.fromEntries(paths.map((p) => [p, { type: 'update' }]));
 
 export const cx = {
   meta: (id: string, cwd: string, at: number) => ({ timestamp: iso(at), type: 'session_meta', payload: { id, cwd, timestamp: iso(at) } }),
   user: (text: string, at: number) => item(at, { type: 'UserMessage', content: [{ type: 'text', text }] }),
   say: (text: string, at: number) => item(at, { type: 'AgentMessage', content: [{ type: 'text', text }], phase: 'final_answer' }),
   run: (command: string, exitCode: number, output: string, at: number) => item(at, { type: 'CommandExecution', command, exit_code: exitCode, status: exitCode === 0 ? 'completed' : 'failed', aggregated_output: output }),
-  change: (paths: string[], at: number) => item(at, { type: 'FileChange', changes: Object.fromEntries(paths.map((p) => [p, { type: 'update' }])), status: 'completed' }),
+  change: (paths: string[], at: number) => item(at, { type: 'FileChange', changes: changesOf(paths), status: 'completed' }),
   started: (at: number) => ev(at, { type: 'task_started', turn_id: 't' }),
   done: (at: number) => ev(at, { type: 'task_complete', turn_id: 't', last_agent_message: null }),
   legacyUser: (text: string, at: number) => ev(at, { type: 'user_message', message: text }),
   legacySay: (text: string, at: number) => ev(at, { type: 'agent_message', message: text }),
   legacyRun: (command: string[], exitCode: number, output: string, at: number) => ev(at, { type: 'exec_command_end', command, exit_code: exitCode, aggregated_output: output }),
   legacyAbort: (at: number) => ev(at, { type: 'turn_aborted', reason: 'interrupted' }),
+  // A patch in an older file: patch_apply_end, with the keys the real ones have (checked 2026-11-05). It names its files.
+  legacyPatch: (paths: string[], success: boolean, at: number) => ev(at, { type: 'patch_apply_end', call_id: 'p1', turn_id: 't', stdout: success ? 'Success.' : '', stderr: success ? '' : 'Failed.', success, status: success ? 'completed' : 'failed', changes: changesOf(paths) }),
+  // Real rollouts have no patch_apply_begin, so these two are the shape the fallback expects, not one seen on disk:
+  // the begin names the files, and an end without its own `changes` says how the patch with the same call_id went.
+  legacyBegin: (paths: string[], callId: string, at: number) => ev(at, { type: 'patch_apply_begin', call_id: callId, turn_id: 't', auto_approved: true, changes: changesOf(paths) }),
+  legacyEnd: (callId: string, success: boolean, at: number) => ev(at, { type: 'patch_apply_end', call_id: callId, turn_id: 't', stdout: '', stderr: '', success }),
+  // An error event, in either format.
+  error: (message: string, at: number) => ev(at, { type: 'error', message, codex_error_info: 'other' }),
 };
 
 // The file is named and filed by the first line's time, in UTC so the path doesn't depend on the machine's time zone.

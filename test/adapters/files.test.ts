@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'vitest';
-import { HEAD_BYTES, SCAN_MS, TAIL_BYTES, isSummaryCwd, parseJsonLines, readHeadTail, recentFiles } from '../../src/adapters/files';
+import { HEAD_BYTES, SCAN_MS, TAIL_BYTES, isMissing, isSummaryCwd, parseJsonLines, readHeadTail, readText, recentFiles } from '../../src/adapters/files';
 
 let dir: string;
 beforeEach(() => {
@@ -130,6 +130,25 @@ test('readHeadTail leaves the lines its windows cut for parseJsonLines to drop',
   expect(lines.length - parsed.length).toBeLessThanOrEqual(3);
   expect(parsed.every((o) => typeof o.i === 'number')).toBe(true);
   expect(parsed.at(-1)).toEqual({ i: 1299, pad: 'x'.repeat(50) });
+});
+
+// readText and isMissing
+
+test('readText returns the whole text of a file, null for one that does not exist, and reports other errors', async () => {
+  const file = writeFile('{"a":1}\n{"b":');
+  expect(await readText(file)).toBe('{"a":1}\n{"b":');
+  expect(await readText(writeFile(''))).toBe('');
+  expect(await readText(path.join(dir, 'gone.jsonl'))).toBeNull();
+  await expect(readText(path.join(file, 'child'))).rejects.toThrow(/ENOTDIR/);
+  await expect(readText(dir)).rejects.toThrow(/EISDIR/);
+});
+
+test('isMissing is true only for a "no such file" error', () => {
+  const failure = (code: string) => Object.assign(new Error(code), { code });
+  expect(isMissing(failure('ENOENT'))).toBe(true);
+  expect(isMissing(failure('EACCES'))).toBe(false);
+  expect(isMissing(failure('ENOTDIR'))).toBe(false);
+  expect([new Error('plain'), null, undefined, 'ENOENT', { code: 'ENOENT' }.code].map(isMissing)).toEqual([false, false, false, false, false]);
 });
 
 // parseJsonLines
