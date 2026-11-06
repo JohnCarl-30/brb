@@ -105,10 +105,6 @@ import { parseArgs } from "util";
 // package.json
 var version = "0.1.0";
 
-// src/compute.ts
-import * as os2 from "os";
-import * as path6 from "path";
-
 // src/adapters/index.ts
 import * as os from "os";
 import * as path from "path";
@@ -181,13 +177,13 @@ async function mtimeOf(file) {
 async function recentFiles(dir, name, sinceMs, maxDepth) {
   async function walk(folder, depth) {
     const found = await Promise.all((await listFolder(folder)).map(async (entry) => {
-      const path7 = join(folder, entry.name);
+      const path8 = join(folder, entry.name);
       if (entry.isDirectory()) {
-        return entry.name !== "subagents" && depth < maxDepth ? walk(path7, depth + 1) : [];
+        return entry.name !== "subagents" && depth < maxDepth ? walk(path8, depth + 1) : [];
       }
       if (!entry.isFile() || !name.test(entry.name)) return [];
-      const mtimeMs = await mtimeOf(path7);
-      return mtimeMs !== null && mtimeMs > sinceMs ? [{ path: path7, mtimeMs }] : [];
+      const mtimeMs = await mtimeOf(path8);
+      return mtimeMs !== null && mtimeMs > sinceMs ? [{ path: path8, mtimeMs }] : [];
     }));
     return found.flat();
   }
@@ -204,10 +200,10 @@ async function readRange(handle, position, length) {
   return buffer.toString("utf8", 0, filled);
 }
 var toLines = (text) => text.split("\n").filter((line) => line !== "");
-async function readHeadTail(path7) {
+async function readHeadTail(path8) {
   let handle;
   try {
-    handle = await open(path7, "r");
+    handle = await open(path8, "r");
   } catch (error) {
     if (isMissing(error)) return { lines: [], tailStart: null };
     throw error;
@@ -224,9 +220,9 @@ async function readHeadTail(path7) {
     await handle.close();
   }
 }
-async function readText(path7) {
+async function readText(path8) {
   try {
-    return await readFile(path7, "utf8");
+    return await readFile(path8, "utf8");
   } catch (error) {
     if (isMissing(error)) return null;
     throw error;
@@ -593,6 +589,10 @@ async function loadAllSessions(roots, now) {
   });
   return { sessions, warnings };
 }
+
+// src/compute.ts
+import * as os2 from "os";
+import * as path6 from "path";
 
 // src/catchup.ts
 import * as path3 from "path";
@@ -1076,6 +1076,97 @@ async function runHook(name, stdin, o) {
   return QUIET;
 }
 
+// src/summarize.ts
+import { execFile } from "child_process";
+import * as fs4 from "fs";
+import * as os3 from "os";
+import * as path7 from "path";
+var PROMPT = "Summarize this AI coding session update for its developer in 8 words or fewer. Reply with only the summary.\n\n";
+var MAX_JOBS = 8;
+var MAX_TEXT = 2e3;
+var MAX_CACHED = 500;
+var TIMEOUT_MS = 3e4;
+var SUMMARY_WIDTH = 60;
+var QUOTES = /^["'`“”‘’]+|["'`“”‘’]+$/g;
+function commandFor(tool, prompt) {
+  if (tool === "claude") return { bin: "claude", args: ["-p", "--model", "haiku", "--no-session-persistence", prompt] };
+  if (tool === "codex") return { bin: "codex", args: ["exec", "--skip-git-repo-check", prompt] };
+  return { bin: "gemini", args: ["-p", prompt] };
+}
+var summaryKey = (r) => `${r.tool}:${r.sessionId}:${r.at}`;
+function readCache(file) {
+  try {
+    const data = JSON.parse(fs4.readFileSync(file, "utf8"));
+    if (typeof data !== "object" || data === null || Array.isArray(data)) return {};
+    return Object.fromEntries(Object.entries(data).filter((e) => typeof e[1] === "string"));
+  } catch {
+    return {};
+  }
+}
+function reply(stdout) {
+  const last = stdout.split("\n").map((l) => l.trim()).filter(Boolean).at(-1) ?? "";
+  return oneLine(last.replace(QUOTES, ""), SUMMARY_WIDTH);
+}
+async function summarizeRows(rows, o) {
+  const jobs = rows.filter((r) => r.status === "finished" || r.status === "failed").slice(0, MAX_JOBS);
+  const file = path7.join(o.brbHome, "cache", "summaries.json");
+  const cache2 = readCache(file);
+  const result = /* @__PURE__ */ new Map();
+  const fresh = {};
+  const todo = [];
+  for (const r of jobs) {
+    const hit = cache2[summaryKey(r)];
+    if (hit !== void 0) result.set(summaryKey(r), hit);
+    else if (o.which(commandFor(r.tool, "").bin)) todo.push(r);
+  }
+  if (todo.length === 0) return result;
+  const cwd = path7.join(os3.tmpdir(), "brb-summaries");
+  fs4.mkdirSync(cwd, { recursive: true });
+  const env = { ...o.env, BRB_INTERNAL: "1" };
+  await Promise.all(todo.map(async (r) => {
+    try {
+      const { bin, args } = commandFor(r.tool, PROMPT + r.longText.slice(0, MAX_TEXT));
+      const { code, stdout } = await o.runner(bin, args, { cwd, env, timeoutMs: TIMEOUT_MS });
+      const line = code === 0 ? reply(stdout) : "";
+      if (line !== "") fresh[summaryKey(r)] = line;
+    } catch {
+    }
+  }));
+  for (const [key, line] of Object.entries(fresh)) result.set(key, line);
+  if (Object.keys(fresh).length > 0) {
+    try {
+      fs4.mkdirSync(path7.dirname(file), { recursive: true });
+      fs4.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries({ ...cache2, ...fresh }).slice(-MAX_CACHED))));
+    } catch {
+    }
+  }
+  return result;
+}
+var defaultRunner = (bin, args, o) => new Promise((resolve5) => {
+  const child = execFile(bin, args, { cwd: o.cwd, env: o.env, timeout: o.timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+    resolve5({ code: err === null ? 0 : typeof err.code === "number" ? err.code : 1, stdout });
+  });
+  child.stdin?.on("error", () => {
+  });
+  child.stdin?.end();
+});
+function onPath(bin, env) {
+  const names = process.platform === "win32" ? [bin, `${bin}.cmd`, `${bin}.exe`] : [bin];
+  for (const dir of (env.PATH ?? "").split(path7.delimiter)) {
+    if (dir === "") continue;
+    for (const name of names) {
+      try {
+        const file = path7.join(dir, name);
+        if (!fs4.statSync(file).isFile()) continue;
+        fs4.accessSync(file, fs4.constants.X_OK);
+        return true;
+      } catch {
+      }
+    }
+  }
+  return false;
+}
+
 // src/cli.ts
 var HELP = `brb: catch up on every AI coding session when you're back
 
@@ -1130,7 +1221,22 @@ async function run(o) {
     return { stdout: brief === "" ? "" : brief + "\n", exitCode: 0 };
   }
   const color = !values["no-color"] && o.isTTY && !("NO_COLOR" in o.env);
-  return { stdout: renderTerminal(c, { color, columns: o.columns ?? 100, all: values.all ?? false }), exitCode: 0 };
+  const view = { color, columns: o.columns ?? 100, all: values.all ?? false };
+  const stdout = renderTerminal(c, view);
+  if (!o.isTTY || values["no-ai"] || o.env.BRB_NO_AI === "1") return { stdout, exitCode: 0 };
+  const rerender = async () => {
+    const rows = [...c.here?.rows ?? [], ...c.elsewhere];
+    const summaries = await summarizeRows(rows, {
+      brbHome: resolveRoots(o.env).brb,
+      env: o.env,
+      runner: o.runner ?? defaultRunner,
+      which: o.which ?? ((bin) => onPath(bin, o.env))
+    });
+    if (summaries.size === 0) return null;
+    for (const r of rows) r.summary = summaries.get(summaryKey(r));
+    return renderTerminal(c, view);
+  };
+  return { stdout, exitCode: 0, rerender };
 }
 async function readStdin() {
   if (process.stdin.isTTY) return "";
@@ -1152,6 +1258,14 @@ async function main() {
     });
     process.stdout.write(result.stdout);
     process.exitCode = result.exitCode;
+    if (result.rerender) {
+      try {
+        const next = await result.rerender();
+        const lines = result.stdout.split("\n").length - 1;
+        if (next !== null && lines < (process.stdout.rows ?? 0)) process.stdout.write(`\x1B[${lines}F\x1B[0J${next}`);
+      } catch {
+      }
+    }
   } catch (err) {
     if (argv[0] !== "hook") throw err;
   }

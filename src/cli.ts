@@ -1,10 +1,12 @@
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { version } from '../package.json';
+import { resolveRoots } from './adapters';
 import { computeCatchUp } from './compute';
 import { runHook } from './hooks';
 import { realpath } from './projects';
 import { renderBrief, renderJson, renderTerminal } from './render';
+import { defaultRunner, onPath, summarizeRows, summaryKey, type Runner } from './summarize';
 import { parseSince } from './time';
 
 export const HELP = `brb: catch up on every AI coding session when you're back
@@ -24,8 +26,8 @@ Usage: brb [options]
 brb reads your local Claude Code, Codex and Gemini CLI history. No API key.
 `;
 
-// `runner` and `which` are for the AI summaries (nothing reads them yet); `stdin` is for `brb hook`.
-export interface RunOptions { argv: string[]; env: NodeJS.ProcessEnv; cwd: string; now: number; isTTY: boolean; columns?: number; stdin?: string; runner?: unknown; which?: (bin: string) => boolean }
+// `runner` and `which` let tests stand in for the AI tools; `stdin` is for `brb hook`.
+export interface RunOptions { argv: string[]; env: NodeJS.ProcessEnv; cwd: string; now: number; isTTY: boolean; columns?: number; stdin?: string; runner?: Runner; which?: (bin: string) => boolean }
 export interface RunResult { stdout: string; exitCode: number; rerender?: () => Promise<string | null> }
 
 const fail = (message: string): RunResult => ({ stdout: `brb: ${message}\nRun brb --help for usage.\n`, exitCode: 1 });
@@ -60,7 +62,21 @@ export async function run(o: RunOptions): Promise<RunResult> {
     return { stdout: brief === '' ? '' : brief + '\n', exitCode: 0 };
   }
   const color = !values['no-color'] && o.isTTY && !('NO_COLOR' in o.env);
-  return { stdout: renderTerminal(c, { color, columns: o.columns ?? 100, all: values.all ?? false }), exitCode: 0 };
+  const view = { color, columns: o.columns ?? 100, all: values.all ?? false };
+  const stdout = renderTerminal(c, view);
+  if (!o.isTTY || values['no-ai'] || o.env.BRB_NO_AI === '1') return { stdout, exitCode: 0 };
+
+  // The facts above print first; the caller asks for this afterwards, so AI never delays them.
+  const rerender = async (): Promise<string | null> => {
+    const rows = [...(c.here?.rows ?? []), ...c.elsewhere];
+    const summaries = await summarizeRows(rows, {
+      brbHome: resolveRoots(o.env).brb, env: o.env, runner: o.runner ?? defaultRunner, which: o.which ?? ((bin) => onPath(bin, o.env)),
+    });
+    if (summaries.size === 0) return null;
+    for (const r of rows) r.summary = summaries.get(summaryKey(r));
+    return renderTerminal(c, view);
+  };
+  return { stdout, exitCode: 0, rerender };
 }
 
 async function readStdin(): Promise<string> {
@@ -79,6 +95,16 @@ async function main(): Promise<void> {
     });
     process.stdout.write(result.stdout);
     process.exitCode = result.exitCode;
+    if (result.rerender) { // only given for an interactive terminal
+      try {
+        const next = await result.rerender();
+        const lines = result.stdout.split('\n').length - 1;
+        // Move back up to the top of the first screen and replace it, but only if that screen never scrolled.
+        if (next !== null && lines < (process.stdout.rows ?? 0)) process.stdout.write(`\x1b[${lines}F\x1b[0J${next}`);
+      } catch {
+        // the facts are already on screen
+      }
+    }
   } catch (err) {
     if (argv[0] !== 'hook') throw err; // a hook that fails is shown to the user, so it exits 0 whatever goes wrong (even process.cwd() or reading stdin)
   }
