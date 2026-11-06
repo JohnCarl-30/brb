@@ -7,6 +7,8 @@
 const ESCAPE = /\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[[0-?]*[ -\/]*[@-~]|[()*+\-.\/].|.)/gu;
 // What the escapes leave behind: control characters (C0, DEL and C1) and whitespace become one space.
 const CONTROL_OR_SPACE = /[\x00-\x1f\x7f-\x9f\s]+/g;
+// For commands only: control characters (and the Unicode line breaks) one by one, so spaces and length are kept.
+const CONTROL = /[\x00-\x1f\x7f-\x9f\u2028\u2029]/g;
 const MARKDOWN_MARKS = /\*\*|__|`/g;
 // Heading and bullet markers at the start of the text ("# ", "- ", "* "), then one numbered-list
 // marker ("1. ", "2) "). The marker is not inside a repeated group, so a huge run of them can't
@@ -36,6 +38,9 @@ export function oneLine(text: string, max: number): string {
   }
   return line;
 }
+
+// A command is copied and run, so it prints whole: no escapes or control codes, but no collapsed spaces and no cut.
+export const commandText = (text: string): string => text.replace(ESCAPE, '').replace(CONTROL, ' ');
 
 export function firstSentence(text: string, max = 70): string {
   return oneLine(sentences(text)[0], max);

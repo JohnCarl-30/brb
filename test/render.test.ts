@@ -93,6 +93,24 @@ test('--all adds detail to ELSEWHERE and a resume line to every row', () => {
   expect(lines[wait + 2]).toBe(`           → claude --resume ${IDS.wait}`);
 });
 
+// A command is copied and run, so it must print whole: spaces kept, nothing cut.
+test('prints resume and next-step commands without collapsing spaces or cutting them', () => {
+  const long = `cd ~/'${'long folder  name/'.repeat(30)}' && claude --resume abc`;
+  expect(long.length).toBeGreaterThan(300);
+  const c = scenarioCatchUp();
+  c.here!.rows[0].resume = long;
+  c.next = [{ label: 'answer Claude', command: long }];
+  const out = renderTerminal(c, { ...plain, all: true }).split('\n');
+  expect(out).toContain(`           → ${long}`);
+  expect(out).toContain(` → answer Claude  ${long}`);
+});
+
+test('still strips control codes from a command', () => {
+  const c = scenarioCatchUp();
+  c.next = [{ label: 'x', command: "cd ~/'a  b\x1b[2J\x1b]0;x\x07c\r\nd' && claude" }];
+  expect(renderTerminal(c, plain)).toContain(" → x  cd ~/'a  bc  d' && claude\n");
+});
+
 test('colors only when asked, without moving the columns', () => {
   const colored = renderTerminal(scenarioCatchUp(), { ...plain, color: true });
   expect(colored).toContain('\x1b[');

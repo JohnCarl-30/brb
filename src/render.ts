@@ -1,6 +1,6 @@
 import pc from 'picocolors';
 import { TOOL_NAME, type CatchUp, type Row } from './catchup';
-import { oneLine } from './text';
+import { commandText, oneLine } from './text';
 import { formatAge } from './time';
 import type { Status } from './types';
 
@@ -20,7 +20,7 @@ const BRIEF_FILES = 5;
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-// Everything printed that came from a session or the disk goes through oneLine: no escape codes, CR or newlines.
+// Everything printed that came from a session or the disk goes through oneLine (or commandText for commands): no escape codes, CR or newlines.
 export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number; all: boolean }): string {
   const k = pc.createColors(o.color);
   const tint: Record<Status, (s: string) => string> = { waiting: k.yellow, finished: k.green, failed: k.red, working: k.cyan, idle: k.dim };
@@ -30,7 +30,7 @@ export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number;
     const paint = tint[r.status];
     const lines = [` ${paint(MARK[r.status])} ${TOOL_NAME[r.tool].padEnd(7)} ${oneLine(title, TITLE_WIDTH).padEnd(TITLE_WIDTH)} ${paint(LABEL[r.status](formatAge(c.now - r.at)))}`];
     if (withDetail) lines.push(DETAIL_INDENT + k.dim(oneLine(r.summary ?? r.detail, detailWidth)));
-    if (o.all) lines.push(DETAIL_INDENT + k.dim(`→ ${oneLine(r.resume, LONG)}`));
+    if (o.all) lines.push(DETAIL_INDENT + k.dim(`→ ${commandText(r.resume)}`));
     return lines;
   };
 
@@ -66,7 +66,7 @@ export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number;
   }
 
   if (c.next.length > 0) {
-    const steps = c.next.map((s) => ({ label: oneLine(s.label, LONG), command: oneLine(s.command, LONG) }));
+    const steps = c.next.map((s) => ({ label: oneLine(s.label, LONG), command: commandText(s.command) }));
     const width = Math.max(...steps.map((s) => s.label.length));
     sections.push(steps.map((s) => ` ${k.yellow('→')} ${s.label.padEnd(width)}  ${s.command}`));
   }

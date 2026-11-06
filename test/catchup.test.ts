@@ -128,6 +128,25 @@ test('prefixes cd for sessions in another folder', () => {
   expect(c.here?.rows[0].resume).toBe('claude --resume c-wait');
 });
 
+// R20: quote the folder only when it needs it; a leading ~/ stays outside the quotes so the shell still expands it.
+test.each([
+  ['a space', '/h/My Projects/blog', "cd ~/'My Projects/blog' && claude --resume c2"],
+  ['a semicolon', '/h/My Projects/blog; rm -rf x', "cd ~/'My Projects/blog; rm -rf x' && claude --resume c2"],
+  ['a single quote', "/h/it's here", "cd ~/'it'\\''s here' && claude --resume c2"],
+  ['a space outside the home folder', '/srv/my app', "cd '/srv/my app' && claude --resume c2"],
+  ['only safe characters', '/h/code/a-b_c.d@e+f', 'cd ~/code/a-b_c.d@e+f && claude --resume c2'],
+])('quotes a resume folder with %s', (_name, cwd, resume) => {
+  const s = session({ id: 'c2', tool: 'claude', cwd, events: [user(10), agent(5, 'Done.'), turnEnd(5)] });
+  expect(buildCatchUp(input({ sessions: [s] })).elsewhere[0].resume).toBe(resume);
+});
+
+test('quotes a session id and a branch that the shell would read as commands', () => {
+  const s = session({ id: 'x; rm -rf ~', tool: 'codex', cwd: SHOP, branch: 'a;b', events: [user(10), agent(5, 'Done.'), turnEnd(5)] });
+  const c = buildCatchUp(input({ sessions: [s] }));
+  expect(c.here!.rows[0].resume).toBe("codex resume 'x; rm -rf ~'");
+  expect(c.next).toEqual([{ label: 'review "x; rm -rf ~"', command: "git diff main...'a;b'" }]);
+});
+
 test('lists edited files newest first, relative to the session folder, at most 5', () => {
   const events = [
     user(30),

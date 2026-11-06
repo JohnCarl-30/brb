@@ -34,10 +34,14 @@ const FIRST_RUN_MS = 8 * 60 * 60_000;
 const MAX_FILES = 5;
 const MAX_NEXT = 3;
 const ORDER: Status[] = ['waiting', 'finished', 'failed', 'working', 'idle'];
+// Session text ends up in commands people paste into a shell: quote what isn't plainly safe. A leading ~/ stays outside the quotes so it still expands.
+const quote = (s: string): string => (/^[A-Za-z0-9._/~@+-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
+const quotePath = (p: string): string => (p.startsWith('~/') ? `~/${quote(p.slice(2))}` : quote(p));
+
 const RESUME: Record<Tool, (id: string) => string> = {
-  claude: (id) => `claude --resume ${id}`,
-  codex: (id) => `codex resume ${id}`,
-  gemini: (id) => `gemini --resume ${id}`,
+  claude: (id) => `claude --resume ${quote(id)}`,
+  codex: (id) => `codex resume ${quote(id)}`,
+  gemini: (id) => `gemini --resume ${quote(id)}`,
 };
 
 const inside = (dir: string, p: string): boolean => p.startsWith(dir + path.sep);
@@ -81,7 +85,7 @@ export function buildCatchUp(input: CatchUpInput): CatchUp {
 
   const hereFolders = new Set([input.cwd, ...(git ? [git.root] : [])].map(realpath));
   const resumeFor = (s: Session): string =>
-    (hereFolders.has(realpath(s.cwd)) ? '' : `cd ${tilde(s.cwd, home)} && `) + RESUME[s.tool](s.id);
+    (hereFolders.has(realpath(s.cwd)) ? '' : `cd ${quotePath(tilde(s.cwd, home))} && `) + RESUME[s.tool](s.id);
 
   const rows = sessions
     .flatMap((s): Row[] => {
@@ -108,7 +112,7 @@ export function buildCatchUp(input: CatchUpInput): CatchUp {
     ...hereRows.filter((r) => r.status === 'failed').map((r) => ({ label: 'see what broke', command: r.resume })),
     ...hereRows
       .filter((r) => r.status === 'finished' && r.branch !== undefined && branch !== null && r.branch !== branch)
-      .map((r) => ({ label: `review "${oneLine(r.title, 24)}"`, command: `git diff ${branch}...${r.branch}` })),
+      .map((r) => ({ label: `review "${oneLine(r.title, 24)}"`, command: `git diff ${quote(branch!)}...${quote(r.branch!)}` })),
     ...(you?.todos[0] ? [{ label: 'pick up your TODO', command: `${you.todos[0].file}:${you.todos[0].line}` }] : []),
   ].slice(0, MAX_NEXT);
 

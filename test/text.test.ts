@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { errorLine, firstSentence, lastQuestion, oneLine } from '../src/text';
+import { commandText, errorLine, firstSentence, lastQuestion, oneLine } from '../src/text';
 
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 
@@ -159,4 +159,9 @@ test('errorLine cleans lines and applies oneLine with its own max, 70 by default
   expect(errorLine('\x1b[31mError: boom\x1b[0m\n')).toBe('Error: boom');
   expect(errorLine('Error: ' + 'x'.repeat(100))).toBe('Error: ' + 'x'.repeat(62) + '…');
   expect(errorLine('Error: boom', 9)).toBe('Error: b…');
+});
+
+test('commandText strips escapes and control characters but keeps spaces and length', () => {
+  expect(commandText("cd ~/'a  b\x1b[31m'\r\n&& x\x07")).toBe("cd ~/'a  b'  && x ");
+  expect(commandText('x'.repeat(500))).toBe('x'.repeat(500));
 });
