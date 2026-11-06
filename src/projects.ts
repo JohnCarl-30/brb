@@ -6,7 +6,7 @@ export interface Project { key: string; name: string }
 const WORKTREES = '/.git/worktrees/'; // git writes forward slashes in the pointer file on every platform
 const cache = new Map<string, Project>();
 
-const realpath = (p: string): string => {
+export const realpath = (p: string): string => {
   try {
     return fs.realpathSync(p);
   } catch {
