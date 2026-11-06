@@ -94,9 +94,9 @@ export async function summarizeRows(
   for (const [key, line] of Object.entries(fresh)) result.set(key, line);
   if (Object.keys(fresh).length > 0) {
     try {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); // private: the cache is digests of the user's work
       // Object keys keep insertion order, so the tail is the newest.
-      fs.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries({ ...cache, ...fresh }).slice(-MAX_CACHED))));
+      fs.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries({ ...cache, ...fresh }).slice(-MAX_CACHED))), { mode: 0o600 });
     } catch {
       // the cache is only a speed-up
     }

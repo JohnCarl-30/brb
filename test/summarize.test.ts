@@ -139,6 +139,14 @@ describe('summarizeRows', () => {
     expect(Object.keys(JSON.parse(fs.readFileSync(file, 'utf8')))).toHaveLength(1);
   });
 
+  // R45: the cache holds one-line digests of the user's work.
+  test.skipIf(process.platform === 'win32')('writes the cache private: folder 0700, file 0600', async () => {
+    await sum([row('claude', 'finished')], fakeRunner().runner);
+    const folder = path.join(brbHome, 'cache');
+    expect(fs.statSync(folder).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(path.join(folder, 'summaries.json')).mode & 0o777).toBe(0o600);
+  });
+
   test('still answers when the cache folder cannot be written', async () => {
     fs.writeFileSync(path.join(brbHome, 'cache'), 'a file where the folder should be');
     const map = await sum([row('claude', 'finished')], fakeRunner().runner);
