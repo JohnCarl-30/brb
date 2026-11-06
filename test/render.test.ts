@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { buildCatchUp, type CatchUpInput } from '../src/catchup';
-import { renderBrief, renderJson, renderTerminal } from '../src/render';
+import { renderBrief, renderJson, renderTerminal, shownElsewhere } from '../src/render';
 import { EXPECTED_BRIEF, EXPECTED_TERMINAL, IDS, NOW, scenarioCatchUp } from './support/expected';
 
 const plain = { color: false, columns: 100, all: false };
@@ -155,4 +155,21 @@ test('numbered: false keeps the old columns and drops the brb <number> hint', ()
   expect(out).toContain('\n ◐ Claude  fix checkout rounding      waiting on you · 8 min\n           asks:');
   expect(out).toContain('\n ✎ You     2 files changed');
   expect(out).not.toContain('brb <number>');
+});
+
+test('ELSEWHERE shows at most 10 rows, always keeping the ones that need you, and says how many it left out', () => {
+  const c = scenarioCatchUp();
+  const done = c.elsewhere[0];
+  c.elsewhere = [
+    ...Array.from({ length: 13 }, (_, i) => ({ ...done, title: `done ${i + 1}` })),
+    { ...done, title: 'broke', status: 'failed' as const },
+  ];
+  const out = renderTerminal(c, plain);
+  expect(out).toContain('done 9 ');
+  expect(out).not.toContain('done 10 ');
+  expect(out).toContain('blog · broke');
+  expect(out).toContain('\n    +4 more · brb --all shows every session\n');
+  expect(out.match(/^ +\d+ [◐●✕]/gm)).toHaveLength(13); // 3 HERE + 10 ELSEWHERE
+  expect(renderTerminal(c, { ...plain, all: true })).not.toContain('more ·');
+  expect(shownElsewhere(c, false).map((r) => r.title).at(-1)).toBe('broke');
 });

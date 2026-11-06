@@ -106,7 +106,7 @@ import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 
 // package.json
-var version = "0.3.0";
+var version = "0.4.0";
 
 // src/adapters/index.ts
 import * as os from "os";
@@ -974,14 +974,22 @@ var LABEL = {
 var TITLE_WIDTH = 26;
 var LONG = 300;
 var BRIEF_ROWS = 7;
+var MAX_ELSEWHERE = 10;
 var BRIEF_FILES = 5;
 var plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+var needsYou = (r) => r.status === "waiting" || r.status === "failed" || r.status === "working";
+function shownElsewhere(c, all) {
+  if (all) return c.elsewhere;
+  let room = MAX_ELSEWHERE - c.elsewhere.filter(needsYou).length;
+  return c.elsewhere.filter((r) => needsYou(r) || room-- > 0);
+}
 function renderTerminal(c, o) {
   const k = import_picocolors.default.createColors(o.color);
   const tint = { waiting: k.yellow, finished: k.green, failed: k.red, working: k.cyan, idle: k.dim };
   const rows = (c.here?.rows.length ?? 0) + c.elsewhere.length;
+  const elsewhere = shownElsewhere(c, o.all);
   const numbered = o.numbered !== false;
-  const numberWidth = numbered ? String(rows).length : 0;
+  const numberWidth = numbered ? String((c.here?.rows.length ?? 0) + elsewhere.length).length : 0;
   const shift = numbered ? " ".repeat(numberWidth + 1) : "";
   const DETAIL_INDENT = shift + " ".repeat(11);
   const detailWidth = Math.max(20, o.columns - 12 - shift.length);
@@ -1017,7 +1025,8 @@ function renderTerminal(c, o) {
   if (c.elsewhere.length > 0) {
     sections.push([
       k.dim(c.here ? " ELSEWHERE" : " EVERYWHERE"),
-      ...c.elsewhere.flatMap((r) => sessionLines(r, `${r.project.name} \xB7 ${r.title}`, o.all))
+      ...elsewhere.flatMap((r) => sessionLines(r, `${r.project.name} \xB7 ${r.title}`, o.all)),
+      ...elsewhere.length < c.elsewhere.length ? [k.dim(`${shift} +${c.elsewhere.length - elsewhere.length} more \xB7 brb --all shows every session`)] : []
     ]);
   }
   const footer = [];
@@ -1198,7 +1207,7 @@ var HELP = `brb: catch up on every AI coding session when you're back
 Usage: brb [options]
        brb <number>     resume that session from the list
 
-  --all            show every detail and resume command
+  --all            show every session, detail and resume command
   --since <time>   look back this far, e.g. 30m, 2h, 1d
   --json           print the catch-up as JSON
   --brief          short plain-text catch-up for AI agents
@@ -1244,7 +1253,7 @@ async function run(o) {
   if (extra.length > 0 || pick !== void 0 && !/^[1-9]\d*$/.test(pick)) return fail("give one session number, e.g. brb 2");
   const c = await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs });
   if (pick !== void 0) {
-    const rows = [...c.here?.rows ?? [], ...c.elsewhere];
+    const rows = [...c.here?.rows ?? [], ...shownElsewhere(c, values.all ?? false)];
     const row = rows[Number(pick) - 1];
     if (!row) return fail(rows.length === 0 ? "no sessions to pick up" : `no session ${pick}: pick 1 to ${rows.length}`);
     return { stdout: `\u2192 ${commandText(row.resume)}
@@ -1258,7 +1267,7 @@ async function run(o) {
   const color = !values["no-color"] && o.isTTY && !("NO_COLOR" in o.env);
   const view = { color, columns: o.columns ?? 100, all: values.all ?? false, numbered: values.exclude === void 0 };
   const stdout = renderTerminal(c, view);
-  const listed = [...c.here?.rows ?? [], ...c.elsewhere];
+  const listed = [...c.here?.rows ?? [], ...shownElsewhere(c, view.all)];
   const choices = o.isTTY && view.numbered && listed.length > 0 ? listed.map((r) => r.resume) : void 0;
   if (!o.isTTY || values["no-ai"] || o.env.BRB_NO_AI === "1") return { stdout, exitCode: 0, choices };
   const rerender = async () => {
@@ -1294,7 +1303,7 @@ async function askPick(choices) {
   rl.on("close", () => cancel.abort());
   try {
     for (; ; ) {
-      const answer = await rl.question(import_picocolors2.default.dim(`Pick a session (1-${choices.length}), Enter to quit: `), { signal: cancel.signal });
+      const answer = await rl.question(import_picocolors2.default.dim(` Pick a session (1-${choices.length}), Enter to quit: `), { signal: cancel.signal });
       const pick = parsePick(answer, choices.length);
       if (pick === "quit") return void 0;
       if (pick !== "again") return choices[pick - 1];
@@ -1340,7 +1349,7 @@ async function main() {
     let command = result.exec;
     if (result.choices && process.stdin.isTTY) {
       command = await askPick(result.choices);
-      if (command) process.stdout.write(`\u2192 ${commandText(command)}
+      if (command) process.stdout.write(` \u2192 ${commandText(command)}
 `);
     }
     if (command) process.exitCode = spawnSync("/bin/sh", ["-c", command], { stdio: "inherit" }).status ?? 1;

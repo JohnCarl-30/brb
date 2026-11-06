@@ -50,7 +50,7 @@ Run it inside a project to see that project first. Run it anywhere else to see e
 - **Your own edits.** Uncommitted changes that no AI session made, plus any TODO you added.
 - **The way back in.** Every session is numbered. Type a number at the prompt, or run `brb 2`, and you're back in session 2, in its own folder and its own CLI. A footer also lists up to three next steps, each with the exact command, such as `claude --resume <id>` or `codex resume <id>`. `--all` adds a resume command under every session.
 
-Sessions in the project you are standing in come first. Other projects follow, one line each.
+Sessions in the project you are standing in come first. Other projects follow, one line each: every session that needs you or is still working, then the newest of the rest, up to 10 rows. A last line says how many it left out, and `--all` shows them all.
 
 ### Every status
 
@@ -68,8 +68,8 @@ Sessions in the project you are standing in come first. Other projects follow, o
 Every session row has a number. In a terminal, brb asks which one you want right after the list:
 
 ```
-Pick a session (1-4), Enter to quit: 3
-→ codex resume 019a0000-0000-7000-8000-000000000003
+ Pick a session (1-4), Enter to quit: 3
+ → codex resume 019a0000-0000-7000-8000-000000000003
 ```
 
 Type the number and press Enter. Enter on its own, `q` or Ctrl-C leaves without resuming anything. If you already know the number, skip the question with `brb 3`.
@@ -78,7 +78,7 @@ brb prints the command, then runs it. A session from another project gets a `cd`
 
 - With npx, the number goes at the end: `npx @john_carl/brb 3`.
 - Outside a terminal, piped or in a script, brb doesn't ask, and `brb 3` only prints the command.
-- Use the same `--since` you used for the list, so the numbers match.
+- Use the same `--since` and `--all` you used for the list, so the numbers match.
 - `/brb` inside Claude Code shows the list without numbers, because it leaves out the session you're typing in.
 
 ## Why not just `/recap`?
@@ -165,7 +165,7 @@ brb: catch up on every AI coding session when you're back
 Usage: brb [options]
        brb <number>     resume that session from the list
 
-  --all            show every detail and resume command
+  --all            show every session, detail and resume command
   --since <time>   look back this far, e.g. 30m, 2h, 1d
   --json           print the catch-up as JSON
   --brief          short plain-text catch-up for AI agents

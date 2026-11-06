@@ -8,7 +8,7 @@ import { resolveRoots } from './adapters';
 import { computeCatchUp } from './compute';
 import { runHook } from './hooks';
 import { realpath } from './projects';
-import { renderBrief, renderJson, renderTerminal } from './render';
+import { renderBrief, renderJson, renderTerminal, shownElsewhere } from './render';
 import { defaultRunner, onPath, summarizeRows, summaryKey, type Runner } from './summarize';
 import { commandText } from './text';
 import { parseSince } from './time';
@@ -18,7 +18,7 @@ export const HELP = `brb: catch up on every AI coding session when you're back
 Usage: brb [options]
        brb <number>     resume that session from the list
 
-  --all            show every detail and resume command
+  --all            show every session, detail and resume command
   --since <time>   look back this far, e.g. 30m, 2h, 1d
   --json           print the catch-up as JSON
   --brief          short plain-text catch-up for AI agents
@@ -70,7 +70,7 @@ export async function run(o: RunOptions): Promise<RunResult> {
   const c = await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs });
   if (pick !== undefined) {
     // Numbered in the order the screen shows them: HERE, then ELSEWHERE.
-    const rows = [...(c.here?.rows ?? []), ...c.elsewhere];
+    const rows = [...(c.here?.rows ?? []), ...shownElsewhere(c, values.all ?? false)];
     const row = rows[Number(pick) - 1];
     if (!row) return fail(rows.length === 0 ? 'no sessions to pick up' : `no session ${pick}: pick 1 to ${rows.length}`);
     // Without a terminal there is nothing to hand over, so only print the command.
@@ -84,7 +84,7 @@ export async function run(o: RunOptions): Promise<RunResult> {
   const color = !values['no-color'] && o.isTTY && !('NO_COLOR' in o.env);
   const view = { color, columns: o.columns ?? 100, all: values.all ?? false, numbered: values.exclude === undefined };
   const stdout = renderTerminal(c, view);
-  const listed = [...(c.here?.rows ?? []), ...c.elsewhere];
+  const listed = [...(c.here?.rows ?? []), ...shownElsewhere(c, view.all)];
   const choices = o.isTTY && view.numbered && listed.length > 0 ? listed.map((r) => r.resume) : undefined;
   if (!o.isTTY || values['no-ai'] || o.env.BRB_NO_AI === '1') return { stdout, exitCode: 0, choices };
 
@@ -131,7 +131,7 @@ async function askPick(choices: string[]): Promise<string | undefined> {
   rl.on('close', () => cancel.abort());
   try {
     for (;;) {
-      const answer = await rl.question(pc.dim(`Pick a session (1-${choices.length}), Enter to quit: `), { signal: cancel.signal });
+      const answer = await rl.question(pc.dim(` Pick a session (1-${choices.length}), Enter to quit: `), { signal: cancel.signal });
       const pick = parsePick(answer, choices.length);
       if (pick === 'quit') return undefined;
       if (pick !== 'again') return choices[pick - 1];
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
     let command = result.exec;
     if (result.choices && process.stdin.isTTY) {
       command = await askPick(result.choices);
-      if (command) process.stdout.write(`→ ${commandText(command)}\n`);
+      if (command) process.stdout.write(` → ${commandText(command)}\n`);
     }
     if (command) process.exitCode = spawnSync('/bin/sh', ['-c', command], { stdio: 'inherit' }).status ?? 1;
   } catch (err) {
