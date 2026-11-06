@@ -9,6 +9,8 @@ export const HEAD_BYTES = 16_384;
 export const TAIL_BYTES = 65_536;
 // A session's title is cut to this many characters.
 export const TITLE_MAX = 60;
+// An error event's text is cut to this many characters.
+export const ERROR_MAX = 200;
 // errorLine is linear in the output and classify only reads its end, so a huge build log is never kept whole.
 export const OUTPUT_KEEP_CHARS = 4_000;
 
@@ -107,6 +109,14 @@ export async function readText(path: string): Promise<string | null> {
 
 // The value when it is a non-empty string, else undefined: a field that is missing, empty or of another type is one case.
 export const str = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
+
+// A string as it is, or the text of every block that has some, joined with newlines. Other blocks (images) add nothing.
+// Claude's blocks must also say `type: 'text'`, so claude.ts keeps a reader of its own.
+export function textOf(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.filter((block) => typeof block?.text === 'string').map((block) => block.text).join('\n');
+}
 
 // The JSON objects among the lines. A line that doesn't parse (a fragment, or one still being written) or
 // that isn't an object is dropped, so a reader never has to guard against a null or a number.

@@ -1,10 +1,9 @@
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { oneLine } from '../text';
 import type { Session, SessionEvent } from '../types';
-import { OUTPUT_KEEP_CHARS, TITLE_MAX, isSummaryCwd, parseJsonLines, readText, recentFiles, str } from './files';
+import { ERROR_MAX, OUTPUT_KEEP_CHARS, TITLE_MAX, isSummaryCwd, parseJsonLines, readText, recentFiles, str, textOf } from './files';
 import type { RecentFile } from './files';
 
-const ERROR_MAX = 200;
 // A rollout is named rollout-<time>-<session id>.jsonl, and the id is a UUID.
 const ID_IN_FILE_NAME = /([0-9a-f-]{36})\.jsonl$/;
 // The kinds of item_completed that become events here. Items of other kinds (Plan, ...) don't count as the file saying
@@ -31,13 +30,6 @@ const isReadItem = (line: any): boolean => line.type === 'event_msg' && line.pay
 // Whether a patch took effect. A FileChange item says `status` and an older patch_apply_end says `success` (newer ones
 // say both). A patch that failed or was declined changed nothing; a field that is missing doesn't count against it.
 const applied = (source: Record<string, any>): boolean => source.success !== false && !NOT_APPLIED.has(source.status);
-
-// A string as it is, or the text of every block that has some, joined with newlines. Other blocks (images) add nothing.
-function textOf(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content.filter((block) => typeof block?.text === 'string').map((block) => block.text).join('\n');
-}
 
 // A command is a string, or the words of one.
 function commandText(command: unknown): string {

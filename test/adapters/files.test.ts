@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'vitest';
-import { HEAD_BYTES, OUTPUT_KEEP_CHARS, SCAN_MS, TAIL_BYTES, TITLE_MAX, isMissing, isSummaryCwd, parseJsonLines, readHeadTail, readText, recentFiles, str } from '../../src/adapters/files';
+import { ERROR_MAX, HEAD_BYTES, OUTPUT_KEEP_CHARS, SCAN_MS, TAIL_BYTES, TITLE_MAX, isMissing, isSummaryCwd, parseJsonLines, readHeadTail, readText, recentFiles, str, textOf } from '../../src/adapters/files';
 
 let dir: string;
 beforeEach(() => {
@@ -16,8 +16,8 @@ test('the scan window is 7 days and the read windows are 16 KiB and 64 KiB', () 
   expect([SCAN_MS, HEAD_BYTES, TAIL_BYTES]).toEqual([604_800_000, 16_384, 65_536]);
 });
 
-test('every adapter cuts a title at 60 characters and keeps the last 4,000 characters of a command output', () => {
-  expect([TITLE_MAX, OUTPUT_KEEP_CHARS]).toEqual([60, 4_000]);
+test('every adapter cuts a title at 60 characters, an error message at 200, and keeps the last 4,000 characters of a command output', () => {
+  expect([TITLE_MAX, ERROR_MAX, OUTPUT_KEEP_CHARS]).toEqual([60, 200, 4_000]);
 });
 
 // recentFiles
@@ -161,6 +161,14 @@ test('str gives a string that has characters in it, and undefined for anything e
   expect(str('main')).toBe('main');
   expect(str(' ')).toBe(' '); // only empty counts as nothing; what blank means is up to the caller
   expect([str(''), str(7), str(null), str(undefined), str(['a']), str({ a: 'a' }), str(true)]).toEqual(Array(7).fill(undefined));
+});
+
+// textOf
+
+test('textOf gives a string as it is, joins the text of every block that has some, and gives nothing for anything else', () => {
+  expect(textOf('a plain string')).toBe('a plain string');
+  expect(textOf([{ type: 'text', text: 'one' }, { inlineData: { data: 'AAAA' } }, null, 'stray', { text: 7 }, { text: 'two' }])).toBe('one\ntwo');
+  expect([textOf([]), textOf(null), textOf(undefined), textOf(5), textOf({ text: 'not in a list' })]).toEqual(['', '', '', '', '']);
 });
 
 // parseJsonLines

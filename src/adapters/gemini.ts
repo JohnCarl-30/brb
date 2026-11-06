@@ -1,20 +1,13 @@
 import { join, resolve } from 'node:path';
 import { oneLine } from '../text';
 import type { Session, SessionEvent } from '../types';
-import { TITLE_MAX, isSummaryCwd, listFolder, readText, recentFiles, str } from './files';
+import { ERROR_MAX, TITLE_MAX, isSummaryCwd, listFolder, readText, recentFiles, str, textOf } from './files';
 import type { RecentFile } from './files';
 
 // The tools that write a file. A call to one that succeeded is an edit.
 const EDIT_TOOLS = new Set(['replace', 'write_file', 'edit']);
 
 const timeOf = (stamp: unknown): number => (typeof stamp === 'string' ? Date.parse(stamp) : NaN);
-
-// A string as it is, or the text of every part that has some, joined with newlines. Other parts (images) add nothing.
-function textOf(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content.filter((part) => typeof part?.text === 'string').map((part) => part.text).join('\n');
-}
 
 // A cancelled call is an error whatever the tool, so a cancelled command is never a failed command. Past that, an edit
 // counts only when the call succeeded and a command says whether it did. A relative file is made absolute from the
@@ -36,8 +29,9 @@ function addToolCall(events: SessionEvent[], call: any, cwd: string, messageAt: 
   }
 }
 
-// Only what the human typed and what the agent did and said become events; the other kinds of message (notices) don't.
-// A gemini message's tool calls come first, then its words, then the end of the turn when it asked for no tool.
+// What the human typed, what the agent did and said, and an error the CLI recorded become events; the other kinds of
+// message (info and warning notices) don't. A gemini message's tool calls come first, then its words, then the end of
+// the turn when it asked for no tool.
 function addMessage(events: SessionEvent[], message: any, cwd: string): void {
   const at = timeOf(message?.timestamp);
   if (Number.isNaN(at)) return;
@@ -50,6 +44,8 @@ function addMessage(events: SessionEvent[], message: any, cwd: string): void {
     const text = textOf(message.content);
     if (text.trim() !== '') events.push({ kind: 'agent', at, text });
     if (calls.length === 0) events.push({ kind: 'turn-end', at });
+  } else if (message.type === 'error') {
+    events.push({ kind: 'error', at, text: oneLine(textOf(message.content), ERROR_MAX) || 'error' });
   }
 }
 

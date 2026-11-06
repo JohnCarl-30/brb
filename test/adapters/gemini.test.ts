@@ -484,16 +484,69 @@ test('messages and tool calls of the wrong shape are ignored, and never fail the
   expect(byId(sessions, 'nolist01')).toMatchObject({ events: [], title: 'untitled session', lastActivityAt: min(1) });
 });
 
-test('ignores the kinds of message brb does not read, whatever they say', async () => {
+test('ignores info and warning messages, and kinds of message brb does not know, whatever they say', async () => {
   const h = fakeHome();
   writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', messages: [
     gm.user('fix the login bug', min(10)),
     message('info', 'A new version is available', min(9)), message('warning', 'The model is slow', min(8)),
-    message('error', 'API Error: the request failed', min(7)), message('sparkle', 'a kind nobody has heard of', min(6)),
+    message('sparkle', 'a kind nobody has heard of', min(7)),
     gm.say('Done.', min(5)),
   ] });
   const [s] = await read(h);
   expect(kinds(s)).toEqual(['user', 'agent', 'turn-end']);
+});
+
+// ---- error messages
+
+test('an error message is an error event, and a chat that ends on one stopped there', async () => {
+  const h = fakeHome();
+  const failure = '[API Error: The model is overloaded. Please try again later.]';
+  writeGeminiSession(h, { id: 'died0001', projectRoot: '/w/died', messages: [
+    gm.user('fix the login bug', min(30)),
+    gm.say('Looking at the login code.', min(25), [gm.call('read_file', { file_path: '/w/died/login.ts' }, 'success', min(25))]),
+    gm.error(failure, min(20)),
+  ] });
+  // The same error, but the chat got past it, so that is not where it stopped.
+  writeGeminiSession(h, { id: 'past0001', projectRoot: '/w/past', messages: [
+    gm.user('fix the login bug', min(30)),
+    gm.error(failure, min(25)),
+    gm.say('Fixed the login bug.', min(20)),
+  ] });
+  const sessions = await read(h);
+  const died = byId(sessions, 'died0001');
+  expect(died.events).toEqual([
+    { kind: 'user', at: min(30), text: 'fix the login bug' },
+    { kind: 'agent', at: min(25), text: 'Looking at the login code.' },
+    { kind: 'error', at: min(20), text: failure },
+  ]);
+  expect(died.lastActivityAt).toBe(min(20));
+  expect(classify(died, NOW)).toMatchObject({ status: 'failed', detail: failure });
+  const past = byId(sessions, 'past0001');
+  expect(kinds(past)).toEqual(['user', 'error', 'agent', 'turn-end']);
+  expect(classify(past, NOW)).toMatchObject({ status: 'finished', detail: 'Fixed the login bug.' });
+});
+
+test('an error message is cleaned and cut to 200 characters, reads text parts, and says error when it has no words', async () => {
+  const h = fakeHome();
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', messages: [
+    gm.user('fix it', min(40)),
+    gm.error('The model is at capacity.\n\x1b[31mTry again later.\x1b[0m', min(30)),
+    gm.error('x'.repeat(300), min(29)),
+    message('error', [{ text: 'part one' }, { text: 'part two' }], min(28)),
+    gm.error('', min(27)), gm.error('  \x1b[0m ', min(26)),
+    message('error', null, min(25)), message('error', 42, min(24)), { id: 'x', timestamp: iso(min(23)), type: 'error' },
+  ] });
+  const [s] = await read(h);
+  expect(s.events.slice(1)).toEqual([
+    { kind: 'error', at: min(30), text: 'The model is at capacity. Try again later.' },
+    { kind: 'error', at: min(29), text: 'x'.repeat(199) + '…' },
+    { kind: 'error', at: min(28), text: 'part one part two' },
+    { kind: 'error', at: min(27), text: 'error' },
+    { kind: 'error', at: min(26), text: 'error' },
+    { kind: 'error', at: min(25), text: 'error' },
+    { kind: 'error', at: min(24), text: 'error' },
+    { kind: 'error', at: min(23), text: 'error' },
+  ]);
 });
 
 test('a session with no events keeps the time its file last changed', async () => {

@@ -129,6 +129,7 @@ export const gm = {
   say: (text: string, at: number, toolCalls?: object[]) => ({ id: `g${at}`, timestamp: iso(at), type: 'gemini', content: text, ...(toolCalls ? { toolCalls } : {}) }),
   call: (name: string, args: object, status: 'success' | 'error' | 'cancelled', at: number) => ({ id: `c${at}`, name, args, status, timestamp: iso(at), result: [] }),
   info: (text: string, at: number) => ({ id: `i${at}`, timestamp: iso(at), type: 'info', content: text }),
+  error: (text: string, at: number) => ({ id: `e${at}`, timestamp: iso(at), type: 'error', content: text }), // an error the CLI recorded
 };
 
 // The project folder is named after the last segment of `projectRoot`, so two roots that end alike share a folder.
