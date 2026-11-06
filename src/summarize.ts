@@ -18,10 +18,12 @@ const SUMMARY_WIDTH = 60;
 const QUOTES = /^["'`“”‘’]+|["'`“”‘’]+$/g;
 
 // Each tool answers one non-interactive question. --no-session-persistence and --ephemeral keep brb's own run out of the user's Claude and Codex history.
+// The text can hold injected instructions (a failed command's output), so nothing may act on it: no tools, no MCP servers, or read-only.
+// Claude's --tools takes a list, so --strict-mcp-config must follow it or the prompt would be read as a tool name.
 export function commandFor(tool: Tool, prompt: string): { bin: string; args: string[] } {
-  if (tool === 'claude') return { bin: 'claude', args: ['-p', '--model', 'haiku', '--no-session-persistence', prompt] };
-  if (tool === 'codex') return { bin: 'codex', args: ['exec', '--skip-git-repo-check', '--ephemeral', prompt] };
-  return { bin: 'gemini', args: ['-p', prompt] };
+  if (tool === 'claude') return { bin: 'claude', args: ['-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--strict-mcp-config', prompt] };
+  if (tool === 'codex') return { bin: 'codex', args: ['exec', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', prompt] };
+  return { bin: 'gemini', args: ['-p', prompt, '--approval-mode', 'plan'] };
 }
 
 export const summaryKey = (r: Row): string => `${r.tool}:${r.sessionId}:${r.at}`;

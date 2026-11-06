@@ -14,6 +14,8 @@ const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'brb-summarize
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 type Call = { bin: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number };
+// The prompt is the one argument that starts with PROMPT (gemini's is not last).
+const promptOf = (c: Call): string => c.args.find((a) => a.startsWith(PROMPT))!;
 function fakeRunner(stdout = 'ok', code = 0): { runner: Runner; calls: Call[] } {
   const calls: Call[] = [];
   const runner: Runner = async (bin, args, o) => {
@@ -40,10 +42,11 @@ const sum = (rows: Row[], runner: Runner, which: (bin: string) => boolean = () =
   summarizeRows(rows, { brbHome, env: { MARK: 'x' }, runner, which, tmpDir });
 
 describe('commandFor', () => {
-  test('asks each tool for one non-interactive answer', () => {
-    expect(commandFor('claude', 'p')).toEqual({ bin: 'claude', args: ['-p', '--model', 'haiku', '--no-session-persistence', 'p'] });
-    expect(commandFor('codex', 'p')).toEqual({ bin: 'codex', args: ['exec', '--skip-git-repo-check', '--ephemeral', 'p'] });
-    expect(commandFor('gemini', 'p')).toEqual({ bin: 'gemini', args: ['-p', 'p'] });
+  // R42: a failed row's text includes command output, which can carry injected instructions, so nothing may act on it.
+  test('asks each tool for one non-interactive answer, with tools off or read-only', () => {
+    expect(commandFor('claude', 'p')).toEqual({ bin: 'claude', args: ['-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--strict-mcp-config', 'p'] });
+    expect(commandFor('codex', 'p')).toEqual({ bin: 'codex', args: ['exec', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', 'p'] });
+    expect(commandFor('gemini', 'p')).toEqual({ bin: 'gemini', args: ['-p', 'p', '--approval-mode', 'plan'] });
   });
 });
 
@@ -59,9 +62,9 @@ describe('summarizeRows', () => {
     expect(calls.map((c) => c.bin).sort()).toEqual(['claude', 'codex', 'gemini']);
     for (const r of rows) {
       const call = calls.find((c) => c.bin === r.tool)!;
-      expect(call.args.at(-1)).toBe(PROMPT + r.longText.slice(0, 2000));
+      expect(promptOf(call)).toBe(PROMPT + r.longText.slice(0, 2000));
     }
-    expect(calls.find((c) => c.bin === 'claude')!.args.at(-1)).not.toContain('codex secret');
+    expect(promptOf(calls.find((c) => c.bin === 'claude')!)).not.toContain('codex secret');
     expect(map.size).toBe(3);
   });
 
@@ -85,8 +88,8 @@ describe('summarizeRows', () => {
     const rows = Array.from({ length: 10 }, (_, i) => row('claude', 'finished', { sessionId: `s${i}`, longText: `text ${i}` }));
     const map = await sum([row('claude', 'working'), ...rows], runner);
     expect(calls).toHaveLength(8);
-    expect(calls.some((c) => c.args.at(-1)!.endsWith('text 7'))).toBe(true);
-    expect(calls.some((c) => c.args.at(-1)!.endsWith('text 8'))).toBe(false);
+    expect(calls.some((c) => promptOf(c).endsWith('text 7'))).toBe(true);
+    expect(calls.some((c) => promptOf(c).endsWith('text 8'))).toBe(false);
     expect(map.size).toBe(8);
   });
 
