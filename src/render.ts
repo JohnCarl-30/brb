@@ -13,7 +13,6 @@ const LABEL: Record<Status, (age: string) => string> = {
   idle: (age) => `idle · ${age}`,
 };
 const TITLE_WIDTH = 26;
-const DETAIL_INDENT = ' '.repeat(11);
 const LONG = 300;        // for session or disk text the layout gives no width: still one clean line
 const BRIEF_ROWS = 7;
 const BRIEF_FILES = 5;
@@ -21,20 +20,28 @@ const BRIEF_FILES = 5;
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 // Everything printed that came from a session or the disk goes through oneLine (or commandText for commands): no escape codes, CR or newlines.
-export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number; all: boolean }): string {
+// `numbered: false` drops the row numbers, for a list that leaves a session out and so wouldn't match `brb <n>`.
+export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number; all: boolean; numbered?: boolean }): string {
   const k = pc.createColors(o.color);
   const tint: Record<Status, (s: string) => string> = { waiting: k.yellow, finished: k.green, failed: k.red, working: k.cyan, idle: k.dim };
-  const detailWidth = Math.max(20, o.columns - 12);
+  const rows = (c.here?.rows.length ?? 0) + c.elsewhere.length;
+  // Every session row gets its number for `brb <n>`, so all rows shift right by the widest number and a space.
+  const numbered = o.numbered !== false;
+  const numberWidth = numbered ? String(rows).length : 0;
+  const shift = numbered ? ' '.repeat(numberWidth + 1) : '';
+  const DETAIL_INDENT = shift + ' '.repeat(11);
+  const detailWidth = Math.max(20, o.columns - 12 - shift.length);
+  let number = 0;
 
   const sessionLines = (r: Row, title: string, withDetail: boolean): string[] => {
     const paint = tint[r.status];
-    const lines = [` ${paint(MARK[r.status])} ${TOOL_NAME[r.tool].padEnd(7)} ${oneLine(title, TITLE_WIDTH).padEnd(TITLE_WIDTH)} ${paint(LABEL[r.status](formatAge(c.now - r.at)))}`];
+    const n = numbered ? `${k.dim(String(++number).padStart(numberWidth))} ` : '';
+    const lines = [` ${n}${paint(MARK[r.status])} ${TOOL_NAME[r.tool].padEnd(7)} ${oneLine(title, TITLE_WIDTH).padEnd(TITLE_WIDTH)} ${paint(LABEL[r.status](formatAge(c.now - r.at)))}`];
     if (withDetail) lines.push(DETAIL_INDENT + k.dim(oneLine(r.summary ?? r.detail, detailWidth)));
     if (o.all) lines.push(DETAIL_INDENT + k.dim(`→ ${commandText(r.resume)}`));
     return lines;
   };
 
-  const rows = (c.here?.rows.length ?? 0) + c.elsewhere.length;
   const sections: string[][] = [];
 
   if (c.sessions === 0) {
@@ -52,7 +59,7 @@ export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number;
     if (you) {
       const [todo] = you.todos;
       const more = you.todos.length > 1 ? ` (+${you.todos.length - 1} more)` : '';
-      lines.push(` ${k.blue('✎')} ${'You'.padEnd(7)} ${k.blue(`${plural(you.changes.length, 'file', 'files')} changed, not committed`)}`);
+      lines.push(`${shift} ${k.blue('✎')} ${'You'.padEnd(7)} ${k.blue(`${plural(you.changes.length, 'file', 'files')} changed, not committed`)}`);
       if (todo) lines.push(DETAIL_INDENT + k.dim(`your TODO: ${oneLine(todo.text, LONG)} (${oneLine(todo.file, LONG)}:${todo.line})${more}`));
     }
     sections.push(lines);
@@ -65,11 +72,14 @@ export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number;
     ]);
   }
 
+  const footer: string[] = [];
   if (c.next.length > 0) {
     const steps = c.next.map((s) => ({ label: oneLine(s.label, LONG), command: commandText(s.command) }));
     const width = Math.max(...steps.map((s) => s.label.length));
-    sections.push(steps.map((s) => ` ${k.yellow('→')} ${s.label.padEnd(width)}  ${s.command}`));
+    footer.push(...steps.map((s) => ` ${k.yellow('→')} ${s.label.padEnd(width)}  ${s.command}`));
   }
+  if (numbered && rows > 0) footer.push(k.dim(' brb <number> picks that session back up'));
+  if (footer.length > 0) sections.push(footer);
 
   if (c.warnings.length > 0) sections.push(c.warnings.map((w) => k.yellow(` ! ${oneLine(w, LONG)}`)));
 

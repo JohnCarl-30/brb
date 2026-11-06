@@ -18,7 +18,7 @@ No install, no API key, no config. To keep it around, `npm i -g @john_carl/brb` 
 - **Finished.** A session that did its work, with the last thing it said.
 - **Stopped.** A session that hit an error, was interrupted, or whose last test or build failed. brb shows the error.
 - **Your own edits.** Uncommitted changes that no AI session made, plus any TODO you added.
-- **The way back in.** A footer lists up to three next steps, each with the exact command, such as `claude --resume <id>` or `codex resume <id>`. `--all` adds a resume command under every session.
+- **The way back in.** Every session is numbered. `brb 2` drops you back into session 2, in its own folder and its own CLI. A footer also lists up to three next steps, each with the exact command, such as `claude --resume <id>` or `codex resume <id>`. `--all` adds a resume command under every session.
 
 Sessions in the project you are standing in come first. Other projects follow, one line each.
 
@@ -70,6 +70,7 @@ brb reads local files only and makes no network calls of its own. No API key. If
 brb: catch up on every AI coding session when you're back
 
 Usage: brb [options]
+       brb <number>     resume that session from the list
 
   --all            show every detail and resume command
   --since <time>   look back this far, e.g. 30m, 2h, 1d

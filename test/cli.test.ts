@@ -69,7 +69,7 @@ test('works outside any git repo', async () => {
   expect(exitCode).toBe(0);
   expect(stdout).toContain(' EVERYWHERE');
   expect(stdout).not.toContain(' HERE ·');
-  expect(stdout.match(/^ [◐●✕] /gm)).toHaveLength(4);
+  expect(stdout.match(/^ \d [◐●✕] /gm)).toHaveLength(4);
 });
 
 test('seedScenario only recreates a folder it made', () => {
@@ -98,4 +98,29 @@ test('redraw leaves a screen that scrolled alone, apart from the summarizing lin
   expect(redraw(screen(22), 'new\n', 24)).toBe('\x1b[23F\x1b[0Jnew\n'); // 22 lines and the status line still fit
   expect(redraw(screen(23), 'new\n', 24)).toBe('\x1b[1F\x1b[0J'); // one more and the top has scrolled away
   expect(redraw(screen(2), 'new\n', 0)).toBe('\x1b[1F\x1b[0J'); // rows unknown
+});
+
+test('brb <number> hands the terminal to that session, numbered HERE then ELSEWHERE', async () => {
+  const here = await run({ argv: ['1'], env: { HOME: world.home }, cwd: world.repo, now: NOW, isTTY: true });
+  expect(here).toEqual({ stdout: `→ claude --resume ${IDS.wait}\n`, exitCode: 0, exec: `claude --resume ${IDS.wait}` });
+  const elsewhere = await run({ argv: ['4'], env: { HOME: world.home }, cwd: world.repo, now: NOW, isTTY: true });
+  expect(elsewhere.exec).toMatch(new RegExp(`^cd .+blog && gemini --resume ${IDS.blog}$`));
+});
+
+test('brb <number> only prints the command without a terminal', async () => {
+  expect(await brb(['3'])).toEqual({ stdout: `→ codex resume ${IDS.fail}\n`, exitCode: 0, exec: undefined });
+});
+
+test('brb <number> rejects a number that is not on the list', async () => {
+  for (const argv of [['5'], ['0'], ['x'], ['1', '2']]) {
+    const { stdout, exitCode } = await brb(argv);
+    expect(exitCode).toBe(1);
+    expect(stdout).toMatch(/^brb: (no session 5: pick 1 to 4|give one session number, e\.g\. brb 2)\n/);
+  }
+});
+
+test('--exclude drops the row numbers, since they would not match brb <number>', async () => {
+  const { stdout } = await brb(['--exclude', IDS.wait]);
+  expect(stdout).toContain('\n ● Claude  add login rate limit');
+  expect(stdout).not.toContain('brb <number>');
 });

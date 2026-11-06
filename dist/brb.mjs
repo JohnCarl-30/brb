@@ -100,11 +100,12 @@ var require_picocolors = __commonJS({
 
 // src/cli.ts
 var import_picocolors2 = __toESM(require_picocolors(), 1);
+import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 
 // package.json
-var version = "0.1.1";
+var version = "0.2.0";
 
 // src/adapters/index.ts
 import * as os from "os";
@@ -970,7 +971,6 @@ var LABEL = {
   idle: (age) => `idle \xB7 ${age}`
 };
 var TITLE_WIDTH = 26;
-var DETAIL_INDENT = " ".repeat(11);
 var LONG = 300;
 var BRIEF_ROWS = 7;
 var BRIEF_FILES = 5;
@@ -978,15 +978,21 @@ var plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 function renderTerminal(c, o) {
   const k = import_picocolors.default.createColors(o.color);
   const tint = { waiting: k.yellow, finished: k.green, failed: k.red, working: k.cyan, idle: k.dim };
-  const detailWidth = Math.max(20, o.columns - 12);
+  const rows = (c.here?.rows.length ?? 0) + c.elsewhere.length;
+  const numbered = o.numbered !== false;
+  const numberWidth = numbered ? String(rows).length : 0;
+  const shift = numbered ? " ".repeat(numberWidth + 1) : "";
+  const DETAIL_INDENT = shift + " ".repeat(11);
+  const detailWidth = Math.max(20, o.columns - 12 - shift.length);
+  let number = 0;
   const sessionLines = (r, title, withDetail) => {
     const paint = tint[r.status];
-    const lines = [` ${paint(MARK[r.status])} ${TOOL_NAME[r.tool].padEnd(7)} ${oneLine(title, TITLE_WIDTH).padEnd(TITLE_WIDTH)} ${paint(LABEL[r.status](formatAge(c.now - r.at)))}`];
+    const n = numbered ? `${k.dim(String(++number).padStart(numberWidth))} ` : "";
+    const lines = [` ${n}${paint(MARK[r.status])} ${TOOL_NAME[r.tool].padEnd(7)} ${oneLine(title, TITLE_WIDTH).padEnd(TITLE_WIDTH)} ${paint(LABEL[r.status](formatAge(c.now - r.at)))}`];
     if (withDetail) lines.push(DETAIL_INDENT + k.dim(oneLine(r.summary ?? r.detail, detailWidth)));
     if (o.all) lines.push(DETAIL_INDENT + k.dim(`\u2192 ${commandText(r.resume)}`));
     return lines;
   };
-  const rows = (c.here?.rows.length ?? 0) + c.elsewhere.length;
   const sections = [];
   if (c.sessions === 0) {
     sections.push([" brb found no AI sessions from the last 7 days.", " Supported: Claude Code, Codex CLI, Gemini CLI."]);
@@ -1002,7 +1008,7 @@ function renderTerminal(c, o) {
     if (you) {
       const [todo] = you.todos;
       const more = you.todos.length > 1 ? ` (+${you.todos.length - 1} more)` : "";
-      lines.push(` ${k.blue("\u270E")} ${"You".padEnd(7)} ${k.blue(`${plural(you.changes.length, "file", "files")} changed, not committed`)}`);
+      lines.push(`${shift} ${k.blue("\u270E")} ${"You".padEnd(7)} ${k.blue(`${plural(you.changes.length, "file", "files")} changed, not committed`)}`);
       if (todo) lines.push(DETAIL_INDENT + k.dim(`your TODO: ${oneLine(todo.text, LONG)} (${oneLine(todo.file, LONG)}:${todo.line})${more}`));
     }
     sections.push(lines);
@@ -1013,11 +1019,14 @@ function renderTerminal(c, o) {
       ...c.elsewhere.flatMap((r) => sessionLines(r, `${r.project.name} \xB7 ${r.title}`, o.all))
     ]);
   }
+  const footer = [];
   if (c.next.length > 0) {
     const steps = c.next.map((s) => ({ label: oneLine(s.label, LONG), command: commandText(s.command) }));
     const width = Math.max(...steps.map((s) => s.label.length));
-    sections.push(steps.map((s) => ` ${k.yellow("\u2192")} ${s.label.padEnd(width)}  ${s.command}`));
+    footer.push(...steps.map((s) => ` ${k.yellow("\u2192")} ${s.label.padEnd(width)}  ${s.command}`));
   }
+  if (numbered && rows > 0) footer.push(k.dim(" brb <number> picks that session back up"));
+  if (footer.length > 0) sections.push(footer);
   if (c.warnings.length > 0) sections.push(c.warnings.map((w) => k.yellow(` ! ${oneLine(w, LONG)}`)));
   return sections.map((lines) => lines.join("\n")).join("\n\n") + "\n";
 }
@@ -1186,6 +1195,7 @@ function onPath(bin, env) {
 var HELP = `brb: catch up on every AI coding session when you're back
 
 Usage: brb [options]
+       brb <number>     resume that session from the list
 
   --all            show every detail and resume command
   --since <time>   look back this far, e.g. 30m, 2h, 1d
@@ -1204,9 +1214,9 @@ Run brb --help for usage.
 `, exitCode: 1 });
 async function run(o) {
   if (o.argv[0] === "hook") return runHook(o.argv[1] ?? "", o.stdin ?? "", o);
-  let values;
+  let values, positionals;
   try {
-    ({ values } = parseArgs({
+    ({ values, positionals } = parseArgs({
       args: o.argv,
       allowPositionals: true,
       options: {
@@ -1229,14 +1239,23 @@ async function run(o) {
 `, exitCode: 0 };
   const sinceMs = values.since === void 0 ? void 0 : parseSince(values.since);
   if (sinceMs === null) return fail("--since takes a time like 30m, 2h or 1d");
+  const [pick, ...extra] = positionals;
+  if (extra.length > 0 || pick !== void 0 && !/^[1-9]\d*$/.test(pick)) return fail("give one session number, e.g. brb 2");
   const c = await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs });
+  if (pick !== void 0) {
+    const rows = [...c.here?.rows ?? [], ...c.elsewhere];
+    const row = rows[Number(pick) - 1];
+    if (!row) return fail(rows.length === 0 ? "no sessions to pick up" : `no session ${pick}: pick 1 to ${rows.length}`);
+    return { stdout: `\u2192 ${commandText(row.resume)}
+`, exitCode: 0, exec: o.isTTY ? row.resume : void 0 };
+  }
   if (values.json) return { stdout: renderJson(c) + "\n", exitCode: 0 };
   if (values.brief) {
     const brief = renderBrief(c);
     return { stdout: brief === "" ? "" : brief + "\n", exitCode: 0 };
   }
   const color = !values["no-color"] && o.isTTY && !("NO_COLOR" in o.env);
-  const view = { color, columns: o.columns ?? 100, all: values.all ?? false };
+  const view = { color, columns: o.columns ?? 100, all: values.all ?? false, numbered: values.exclude === void 0 };
   const stdout = renderTerminal(c, view);
   if (!o.isTTY || values["no-ai"] || o.env.BRB_NO_AI === "1") return { stdout, exitCode: 0 };
   const rerender = async () => {
@@ -1278,6 +1297,7 @@ async function main() {
     });
     process.stdout.write(result.stdout);
     process.exitCode = result.exitCode;
+    if (result.exec) process.exitCode = spawnSync("/bin/sh", ["-c", result.exec], { stdio: "inherit" }).status ?? 1;
     if (result.rerender) {
       process.stdout.write(`${result.pending}
 `);

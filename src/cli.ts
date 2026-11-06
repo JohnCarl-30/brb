@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import pc from 'picocolors';
@@ -8,11 +9,13 @@ import { runHook } from './hooks';
 import { realpath } from './projects';
 import { renderBrief, renderJson, renderTerminal } from './render';
 import { defaultRunner, onPath, summarizeRows, summaryKey, type Runner } from './summarize';
+import { commandText } from './text';
 import { parseSince } from './time';
 
 export const HELP = `brb: catch up on every AI coding session when you're back
 
 Usage: brb [options]
+       brb <number>     resume that session from the list
 
   --all            show every detail and resume command
   --since <time>   look back this far, e.g. 30m, 2h, 1d
@@ -29,17 +32,18 @@ brb reads your local Claude Code, Codex and Gemini CLI history. No API key.
 
 // `runner`, `which` and `tmpDir` let tests stand in for the AI tools and keep off the real tmp folder; `stdin` is for `brb hook`.
 export interface RunOptions { argv: string[]; env: NodeJS.ProcessEnv; cwd: string; now: number; isTTY: boolean; columns?: number; stdin?: string; runner?: Runner; which?: (bin: string) => boolean; tmpDir?: string }
-// `pending` is the one line to show while `rerender` works; it is only there when `rerender` is.
-export interface RunResult { stdout: string; exitCode: number; rerender?: () => Promise<string | null>; pending?: string }
+// `pending` is the one line to show while `rerender` works; it is only there when `rerender` is. `exec` is a shell
+// command to hand the terminal to once stdout is written.
+export interface RunResult { stdout: string; exitCode: number; rerender?: () => Promise<string | null>; pending?: string; exec?: string }
 
 const fail = (message: string): RunResult => ({ stdout: `brb: ${message}\nRun brb --help for usage.\n`, exitCode: 1 });
 
 export async function run(o: RunOptions): Promise<RunResult> {
   // Before the args are parsed, so a hook can't end in a usage error: it must exit 0.
   if (o.argv[0] === 'hook') return runHook(o.argv[1] ?? '', o.stdin ?? '', o);
-  let values;
+  let values, positionals;
   try {
-    ({ values } = parseArgs({
+    ({ values, positionals } = parseArgs({
       args: o.argv,
       allowPositionals: true,
       options: {
@@ -56,15 +60,25 @@ export async function run(o: RunOptions): Promise<RunResult> {
 
   const sinceMs = values.since === undefined ? undefined : parseSince(values.since);
   if (sinceMs === null) return fail('--since takes a time like 30m, 2h or 1d');
+  const [pick, ...extra] = positionals;
+  if (extra.length > 0 || (pick !== undefined && !/^[1-9]\d*$/.test(pick))) return fail('give one session number, e.g. brb 2');
 
   const c = await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs });
+  if (pick !== undefined) {
+    // Numbered in the order the screen shows them: HERE, then ELSEWHERE.
+    const rows = [...(c.here?.rows ?? []), ...c.elsewhere];
+    const row = rows[Number(pick) - 1];
+    if (!row) return fail(rows.length === 0 ? 'no sessions to pick up' : `no session ${pick}: pick 1 to ${rows.length}`);
+    // Without a terminal there is nothing to hand over, so only print the command.
+    return { stdout: `→ ${commandText(row.resume)}\n`, exitCode: 0, exec: o.isTTY ? row.resume : undefined };
+  }
   if (values.json) return { stdout: renderJson(c) + '\n', exitCode: 0 };
   if (values.brief) {
     const brief = renderBrief(c);
     return { stdout: brief === '' ? '' : brief + '\n', exitCode: 0 };
   }
   const color = !values['no-color'] && o.isTTY && !('NO_COLOR' in o.env);
-  const view = { color, columns: o.columns ?? 100, all: values.all ?? false };
+  const view = { color, columns: o.columns ?? 100, all: values.all ?? false, numbered: values.exclude === undefined };
   const stdout = renderTerminal(c, view);
   if (!o.isTTY || values['no-ai'] || o.env.BRB_NO_AI === '1') return { stdout, exitCode: 0 };
 
@@ -106,6 +120,7 @@ async function main(): Promise<void> {
     });
     process.stdout.write(result.stdout);
     process.exitCode = result.exitCode;
+    if (result.exec) process.exitCode = spawnSync('/bin/sh', ['-c', result.exec], { stdio: 'inherit' }).status ?? 1;
     if (result.rerender) { // only given for an interactive terminal
       process.stdout.write(`${result.pending}\n`);
       process.once('SIGINT', () => { process.stdout.write(redraw(result.stdout, null, 0)); process.exit(); });
