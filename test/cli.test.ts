@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import pkg from '../package.json';
-import { HELP, run } from '../src/cli';
+import { HELP, redraw, run } from '../src/cli';
 import { EXPECTED_TERMINAL, IDS, NOW } from './support/expected';
 import { seedScenario } from './support/scenario';
 
@@ -82,4 +82,20 @@ test('seedScenario only recreates a folder it made', () => {
   const again = path.join(tmp, 'again');
   seedScenario(again, NOW);
   expect(() => seedScenario(again, NOW)).not.toThrow();
+});
+
+// The first screen plus the "summarizing…" line is what the cursor has to climb back over.
+test('redraw replaces the first screen and the summarizing line with the new screen', () => {
+  expect(redraw('a\nb\n', 'A\nB\n', 24)).toBe('\x1b[3F\x1b[0JA\nB\n');
+});
+
+test('redraw only wipes the summarizing line when no summary came back', () => {
+  expect(redraw('a\nb\n', null, 24)).toBe('\x1b[1F\x1b[0J');
+});
+
+test('redraw leaves a screen that scrolled alone, apart from the summarizing line', () => {
+  const screen = (lines: number) => 'x\n'.repeat(lines);
+  expect(redraw(screen(22), 'new\n', 24)).toBe('\x1b[23F\x1b[0Jnew\n'); // 22 lines and the status line still fit
+  expect(redraw(screen(23), 'new\n', 24)).toBe('\x1b[1F\x1b[0J'); // one more and the top has scrolled away
+  expect(redraw(screen(2), 'new\n', 0)).toBe('\x1b[1F\x1b[0J'); // rows unknown
 });

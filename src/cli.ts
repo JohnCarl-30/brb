@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import pc from 'picocolors';
 import { version } from '../package.json';
 import { resolveRoots } from './adapters';
 import { computeCatchUp } from './compute';
@@ -28,7 +29,8 @@ brb reads your local Claude Code, Codex and Gemini CLI history. No API key.
 
 // `runner`, `which` and `tmpDir` let tests stand in for the AI tools and keep off the real tmp folder; `stdin` is for `brb hook`.
 export interface RunOptions { argv: string[]; env: NodeJS.ProcessEnv; cwd: string; now: number; isTTY: boolean; columns?: number; stdin?: string; runner?: Runner; which?: (bin: string) => boolean; tmpDir?: string }
-export interface RunResult { stdout: string; exitCode: number; rerender?: () => Promise<string | null> }
+// `pending` is the one line to show while `rerender` works; it is only there when `rerender` is.
+export interface RunResult { stdout: string; exitCode: number; rerender?: () => Promise<string | null>; pending?: string }
 
 const fail = (message: string): RunResult => ({ stdout: `brb: ${message}\nRun brb --help for usage.\n`, exitCode: 1 });
 
@@ -78,7 +80,14 @@ export async function run(o: RunOptions): Promise<RunResult> {
     for (const r of rows) r.summary = summaries.get(summaryKey(r));
     return renderTerminal(c, view);
   };
-  return { stdout, exitCode: 0, rerender };
+  return { stdout, exitCode: 0, rerender, pending: pc.createColors(color).dim('summarizing… (Ctrl-C to skip)') };
+}
+
+// Escape string that follows the first screen and its "pending" line: it wipes them and prints the new screen in their place.
+// The new screen is only drawn if the old one never scrolled, else only the pending line goes (it is always the line just above the cursor).
+export function redraw(shown: string, next: string | null, rows: number): string {
+  const lines = shown.split('\n').length; // the screen's lines (it ends in a newline), plus the pending line
+  return next !== null && lines < rows ? `\x1b[${lines}F\x1b[0J${next}` : '\x1b[1F\x1b[0J';
 }
 
 async function readStdin(): Promise<string> {
@@ -98,14 +107,10 @@ async function main(): Promise<void> {
     process.stdout.write(result.stdout);
     process.exitCode = result.exitCode;
     if (result.rerender) { // only given for an interactive terminal
-      try {
-        const next = await result.rerender();
-        const lines = result.stdout.split('\n').length - 1;
-        // Move back up to the top of the first screen and replace it, but only if that screen never scrolled.
-        if (next !== null && lines < (process.stdout.rows ?? 0)) process.stdout.write(`\x1b[${lines}F\x1b[0J${next}`);
-      } catch {
-        // the facts are already on screen
-      }
+      process.stdout.write(`${result.pending}\n`);
+      process.once('SIGINT', () => { process.stdout.write(redraw(result.stdout, null, 0)); process.exit(); });
+      const next = await result.rerender().catch(() => null); // the facts are already on screen
+      process.stdout.write(redraw(result.stdout, next, process.stdout.rows ?? 0));
     }
   } catch (err) {
     if (argv[0] !== 'hook') throw err; // a hook that fails is shown to the user, so it exits 0 whatever goes wrong (even process.cwd() or reading stdin)

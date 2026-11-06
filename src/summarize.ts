@@ -13,7 +13,7 @@ export const PROMPT = 'Summarize this AI coding session update for its developer
 const MAX_JOBS = 8;
 const MAX_TEXT = 2000;
 const MAX_CACHED = 500;
-const TIMEOUT_MS = 30_000;
+const TIMEOUT_MS = 20_000;
 const SUMMARY_WIDTH = 60;
 const QUOTES = /^["'`“”‘’]+|["'`“”‘’]+$/g;
 

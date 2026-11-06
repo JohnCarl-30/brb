@@ -187,7 +187,7 @@ describe('summarizeRows', () => {
     expect(call.env.MARK).toBe('x'); // the caller's env is kept
     expect(path.basename(call.cwd)).toBe('brb-summaries');
     expect(call.cwd).toBe(path.join(tmpDir, 'brb-summaries'));
-    expect(call.timeoutMs).toBe(30_000);
+    expect(call.timeoutMs).toBe(20_000);
   });
 
   describe.skipIf(process.platform === 'win32')('the folder the tools run in', () => {
@@ -372,6 +372,13 @@ describe('run', () => {
     expect((await brb([], { isTTY: false })).rerender).toBeUndefined();
     expect((await brb(['--json'])).rerender).toBeUndefined();
     expect((await brb(['--brief'])).rerender).toBeUndefined();
+  });
+
+  test('says summaries are coming, dim only when color is on', async () => {
+    expect((await brb(['--no-color'])).pending).toBe('summarizing… (Ctrl-C to skip)');
+    expect((await brb([])).pending).toBe('\x1b[2msummarizing… (Ctrl-C to skip)\x1b[22m');
+    expect((await brb(['--no-ai'])).pending).toBeUndefined();
+    expect((await brb([], { isTTY: false })).pending).toBeUndefined();
   });
 
   test('redraws the screen with each finished or failed session summarized', async () => {
