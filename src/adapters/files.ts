@@ -17,7 +17,8 @@ export interface RecentFile { path: string; mtimeMs: number }
 // Whether a read failed because the file or folder isn't there (it was removed, or the tool isn't installed).
 export const isMissing = (error: unknown): boolean => (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 
-async function listFolder(folder: string) {
+// What a folder holds. A folder that isn't there has nothing; any other error throws.
+export async function listFolder(folder: string) {
   try {
     return await readdir(folder, { withFileTypes: true });
   } catch (error) {
