@@ -13,7 +13,7 @@ test('strips terminal control codes from session text', () => {
   const evil = 'ok\x1b[2J\x1b]0;pwned\x07 done';
   const c = scenarioCatchUp();
   c.here!.rows[0].detail = evil;
-  expect(renderTerminal(c, plain)).toContain('           ok done\n');
+  expect(renderTerminal(c, plain)).toContain('             ok done\n');
 
   // Every string that came from a session or the disk, in both outputs.
   const e = '\x1b[2J\x1b]0;x\x07a\r\nb';
@@ -29,7 +29,7 @@ test('strips terminal control codes from session text', () => {
   for (const out of [renderTerminal(hostile, { ...plain, all: true }), renderBrief(hostile)]) {
     expect(out).not.toMatch(/[\x00-\x09\x0b-\x1f\x7f]/); // only \n separates lines
   }
-  expect(renderTerminal(hostile, { ...plain, all: true }).split('\n')).toContain('           a b');
+  expect(renderTerminal(hostile, { ...plain, all: true }).split('\n')).toContain('             a b');
 });
 
 test('says when nothing moved', () => {
@@ -86,11 +86,11 @@ test('--all adds detail to ELSEWHERE and a resume line to every row', () => {
   const lines = renderTerminal(scenarioCatchUp(), { ...plain, all: true }).split('\n');
   const blog = lines.findIndex((l) => l.includes('fix RSS dates'));
   expect(lines.slice(blog + 1, blog + 3)).toEqual([
-    '           Fixed the RSS dates to use UTC.',
-    `           → cd ~/code/blog && gemini --resume ${IDS.blog}`,
+    '             Fixed the RSS dates to use UTC.',
+    `             → cd ~/code/blog && gemini --resume ${IDS.blog}`,
   ]);
   const wait = lines.findIndex((l) => l.includes('fix checkout rounding'));
-  expect(lines[wait + 2]).toBe(`           → claude --resume ${IDS.wait}`);
+  expect(lines[wait + 2]).toBe(`             → claude --resume ${IDS.wait}`);
 });
 
 // A command is copied and run, so it must print whole: spaces kept, nothing cut.
@@ -101,7 +101,7 @@ test('prints resume and next-step commands without collapsing spaces or cutting 
   c.here!.rows[0].resume = long;
   c.next = [{ label: 'answer Claude', command: long }];
   const out = renderTerminal(c, { ...plain, all: true }).split('\n');
-  expect(out).toContain(`           → ${long}`);
+  expect(out).toContain(`             → ${long}`);
   expect(out).toContain(` → answer Claude  ${long}`);
 });
 
@@ -138,4 +138,21 @@ test('json leaves out longText', () => {
   expect(parsed.here.rows[0].title).toBe('fix checkout rounding');
   expect(parsed.here.rows[0].longText).toBeUndefined();
   expect(parsed.elsewhere[0].longText).toBeUndefined();
+});
+
+test('pads row numbers so ten or more rows keep their columns', () => {
+  const c = scenarioCatchUp();
+  c.elsewhere = Array.from({ length: 7 }, () => ({ ...c.elsewhere[0] }));
+  const lines = renderTerminal(c, plain).split('\n');
+  expect(lines).toContain('  1 ◐ Claude  fix checkout rounding      waiting on you · 8 min');
+  expect(lines).toContain('              asks: "Round per item or on the total?"');
+  expect(lines).toContain('    ✎ You     2 files changed, not committed');
+  expect(lines).toContain(' 10 ● Gemini  blog · fix RSS dates       finished · 30 min ago');
+});
+
+test('numbered: false keeps the old columns and drops the brb <number> hint', () => {
+  const out = renderTerminal(scenarioCatchUp(), { ...plain, numbered: false });
+  expect(out).toContain('\n ◐ Claude  fix checkout rounding      waiting on you · 8 min\n           asks:');
+  expect(out).toContain('\n ✎ You     2 files changed');
+  expect(out).not.toContain('brb <number>');
 });
