@@ -13,7 +13,7 @@ Text:
 ```
 I run Claude Code, Codex and Gemini CLI in a few terminals at once. When I come back from a break I can't tell which one is waiting on me, which finished and which broke.
 
-brb reads the session history those tools already keep on disk and prints one screen: what is waiting on you (and the question it asked), what finished, what stopped on an error, what you changed yourself, with the exact commands for your next steps.
+brb reads the session history those tools already keep on disk and prints one screen: what is waiting on you (and the question it asked), what finished, what stopped on an error, what you changed yourself. Every session is numbered: type a number and brb drops you back into it, in its own folder with its own CLI (claude --resume, codex resume, gemini --resume).
 
 It reads local files only and makes no network calls of its own. No API key, no config: npx @john_carl/brb. If an AI CLI is installed, brb can ask that same tool for a one-line summary. A session's text never goes to a different tool. --no-ai turns it off.
 

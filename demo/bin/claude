@@ -1,0 +1,3 @@
+#!/bin/sh
+# Stands in for Claude Code in the demo recording, so the GIF never starts a real session.
+exit 0
