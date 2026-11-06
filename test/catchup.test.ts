@@ -51,6 +51,11 @@ test('puts waiting first, then finished, then failed', () => {
   expect(buildCatchUp(input()).here?.rows.map((r) => r.status)).toEqual(['waiting', 'finished', 'failed']);
 });
 
+test('counts every session it was given, minus the excluded one', () => {
+  expect(buildCatchUp(input()).sessions).toBe(4);
+  expect(buildCatchUp(input({ excludeSessionId: 'c-wait' })).sessions).toBe(3);
+});
+
 test('measures time away from your last message in this project', () => {
   expect(buildCatchUp(input()).awayMs).toBe(47 * 60_000);
 });

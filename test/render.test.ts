@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
+import { buildCatchUp, type CatchUpInput } from '../src/catchup';
 import { renderBrief, renderJson, renderTerminal } from '../src/render';
-import { EXPECTED_BRIEF, EXPECTED_TERMINAL, IDS, scenarioCatchUp } from './support/expected';
+import { EXPECTED_BRIEF, EXPECTED_TERMINAL, IDS, NOW, scenarioCatchUp } from './support/expected';
 
 const plain = { color: false, columns: 100, all: false };
 
@@ -45,8 +46,35 @@ test('says nothing moved without a time away on a first run', () => {
 });
 
 test('says when there are no sessions at all', () => {
-  const c = { ...scenarioCatchUp(), here: null, elsewhere: [], next: [] };
+  const c = { ...scenarioCatchUp(), sessions: 0, here: null, elsewhere: [], next: [] };
   expect(renderTerminal(c, plain)).toBe(' brb found no AI sessions from the last 7 days.\n Supported: Claude Code, Codex CLI, Gemini CLI.\n');
+});
+
+// Real buildCatchUp output: the only session's last activity is your own message, so nothing moved after it.
+const quiet = (over: Partial<CatchUpInput> = {}): CatchUpInput => ({
+  now: NOW, cwd: '/h/code/shopfront', home: '/h', permissions: new Map(), git: null, warnings: [],
+  sessions: [{
+    id: 's1', tool: 'claude', cwd: '/h/code/shopfront', title: 'x', lastActivityAt: NOW - 47 * 60_000,
+    events: [{ kind: 'user', at: NOW - 47 * 60_000, text: 'x' }],
+  }],
+  ...over,
+});
+
+test('says nothing moved when sessions exist but none moved since your last message', () => {
+  const c = buildCatchUp(quiet());
+  expect(c.here).toBeNull();
+  expect(renderTerminal(c, plain)).toBe(' Welcome back · away 47 min · nothing moved\n');
+});
+
+test('says nothing moved under --since when sessions exist but are older', () => {
+  const c = buildCatchUp(quiet({ sinceMs: 10 * 60_000 }));
+  expect(renderTerminal(c, plain)).toBe(' Welcome back · nothing moved recently\n');
+});
+
+test('says there are no sessions when buildCatchUp is given none', () => {
+  expect(renderTerminal(buildCatchUp(quiet({ sessions: [] })), plain)).toBe(
+    ' brb found no AI sessions from the last 7 days.\n Supported: Claude Code, Codex CLI, Gemini CLI.\n',
+  );
 });
 
 test('counts things without a time away on a first run', () => {

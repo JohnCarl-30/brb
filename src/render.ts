@@ -37,7 +37,7 @@ export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number;
   const rows = (c.here?.rows.length ?? 0) + c.elsewhere.length;
   const sections: string[][] = [];
 
-  if (!c.here && c.elsewhere.length === 0) {
+  if (c.sessions === 0) {
     sections.push([' brb found no AI sessions from the last 7 days.', ' Supported: Claude Code, Codex CLI, Gemini CLI.']);
   } else {
     const away = c.awayMs === null ? '' : ` · away ${formatAge(c.awayMs)}`;

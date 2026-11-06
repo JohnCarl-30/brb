@@ -40,7 +40,7 @@ export function scenarioCatchUp(): CatchUp {
     resume: `cd ~/code/blog && gemini --resume ${IDS.blog}`,
   });
   return {
-    now: NOW, awayMs: 47 * 60_000, warnings: [],
+    now: NOW, awayMs: 47 * 60_000, warnings: [], sessions: 4,
     here: {
       project: SHOP, branch: 'main', rows: [wait, done, fail],
       you: {

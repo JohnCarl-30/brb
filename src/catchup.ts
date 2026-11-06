@@ -15,6 +15,7 @@ export interface Row {
 export interface NextStep { label: string; command: string }
 export interface CatchUp {
   now: number; awayMs: number | null; warnings: string[];
+  sessions: number;  // how many sessions were considered, moved or not (0 means brb found none)
   here: { project: Project; branch: string | null; rows: Row[]; you: { changes: Change[]; todos: Todo[] } | null } | null;
   elsewhere: Row[];
   next: NextStep[];
@@ -111,5 +112,5 @@ export function buildCatchUp(input: CatchUpInput): CatchUp {
     ...(you?.todos[0] ? [{ label: 'pick up your TODO', command: `${you.todos[0].file}:${you.todos[0].line}` }] : []),
   ].slice(0, MAX_NEXT);
 
-  return { now, awayMs, warnings: input.warnings, here, elsewhere, next };
+  return { now, awayMs, warnings: input.warnings, sessions: sessions.length, here, elsewhere, next };
 }
