@@ -48,7 +48,7 @@ export function writeClaudeSession(
     ...(sidechain ? { isSidechain: true } : {}),
   });
   const lines = o.lines.map((line, i) => stamp(line, `u${i}`, o.sidechain?.includes(i) ?? false));
-  const times = o.lines.map(timestampOf).filter((t): t is number => t !== undefined);
+  const times = o.lines.map(timestampOf).filter((t): t is number => t !== undefined && !Number.isNaN(t));
 
   const pad: object[] = [];
   for (let bytes = 0; bytes < (o.filler ?? 0); ) {
