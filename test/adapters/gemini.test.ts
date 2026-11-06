@@ -556,6 +556,141 @@ test('a session with no events keeps the time its file last changed', async () =
   expect(s).toMatchObject({ title: 'untitled session', events: [], lastActivityAt: min(30) });
 });
 
+// ---- shell commands: what their results say
+
+// The result of a call with one part, whose response is whatever a test wants.
+const respond = (response: unknown) => [{ functionResponse: { id: 'r1', name: 'run_shell_command', response } }];
+const shellCommands = (s: Session) => s.events.flatMap((e) => (e.kind === 'command' ? [e] : []));
+
+test('a shell command that exited with a non-zero code failed, though its call succeeded, and the detail is its error line', async () => {
+  const h = fakeHome();
+  const log = '> next build\nCompiling...\nError: next.config.js: unknown option "ppr"';
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/shopfront', messages: [
+    gm.user('upgrade to Next 16', min(30)),
+    gm.say('', min(25), [gm.call('run_shell_command', { command: 'npm run build' }, 'success', min(25), gm.shellResult(log, 1))]),
+    gm.say('The build fails.', min(20)),
+  ] });
+  const [s] = await read(h);
+  expect(s.events[1]).toEqual({ kind: 'command', at: min(25), command: 'npm run build', ok: false, output: log });
+  expect(classify(s, NOW)).toMatchObject({ status: 'failed', detail: 'Error: next.config.js: unknown option "ppr"' });
+});
+
+test('every exit code but 0 fails a command', async () => {
+  const h = fakeHome();
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', messages: [
+    gm.user('try things', min(30)),
+    gm.say('', min(20), [1, 2, 127, -1].map((code) => gm.call('run_shell_command', { command: `exit ${code}` }, 'success', min(20), gm.shellResult('x', code)))),
+  ] });
+  const [s] = await read(h);
+  expect(shellCommands(s).map((c) => [c.command, c.ok])).toEqual([['exit 1', false], ['exit 2', false], ['exit 127', false], ['exit -1', false]]);
+});
+
+test('a shell command with no exit code line, or a zero one, succeeded', async () => {
+  const h = fakeHome();
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', messages: [
+    gm.user('check it', min(30)),
+    gm.say('', min(20), [
+      gm.call('run_shell_command', { command: 'npm test' }, 'success', min(20), gm.shellResult('42 passing')),
+      gm.call('run_shell_command', { command: 'npm run lint' }, 'success', min(19), respond({ output: 'Output: clean\nExit Code: 0\nProcess Group PGID: 7' })),
+      gm.call('run_shell_command', { command: 'make' }, 'success', min(18), respond({ output: 'Output: done\nExit Code: (none)' })),
+    ]),
+    gm.say('All fine.', min(10)),
+  ] });
+  const [s] = await read(h);
+  expect(shellCommands(s)).toEqual([
+    { kind: 'command', at: min(20), command: 'npm test', ok: true, output: '42 passing' },
+    { kind: 'command', at: min(19), command: 'npm run lint', ok: true, output: 'clean' },
+    { kind: 'command', at: min(18), command: 'make', ok: true, output: 'done' },
+  ]);
+  expect(classify(s, NOW).status).toBe('finished');
+});
+
+test('a shell call that errored failed whatever its text says, and a cancelled one is still an error', async () => {
+  const h = fakeHome();
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', messages: [
+    gm.user('check it', min(30)),
+    gm.say('', min(20), [
+      gm.call('run_shell_command', { command: 'npm test' }, 'error', min(20), gm.shellResult('42 passing')), // no exit code line, but the call errored
+      gm.call('run_shell_command', { command: 'npm run lint' }, 'error', min(19), respond({ error: 'The command was rejected.' })),
+      gm.call('run_shell_command', { command: 'npm run build' }, 'cancelled', min(18), respond({ error: 'Operation cancelled.' })),
+    ]),
+  ] });
+  const [s] = await read(h);
+  expect(s.events.slice(1)).toEqual([
+    { kind: 'command', at: min(20), command: 'npm test', ok: false, output: '42 passing' },
+    { kind: 'command', at: min(19), command: 'npm run lint', ok: false, output: 'The command was rejected.' },
+    { kind: 'error', at: min(18), text: 'run_shell_command was cancelled' }, // a cancelled call's result is not read
+  ]);
+});
+
+test("a command's output loses the labelled lines Gemini adds, and keeps its last 4,000 characters", async () => {
+  const h = fakeHome();
+  const long = 'HEAD' + 'x'.repeat(9_000) + 'TAIL';
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', messages: [
+    gm.user('run it', min(30)),
+    gm.say('', min(20), [
+      gm.call('run_shell_command', { command: 'npm start &' }, 'success', min(20), respond({ output: 'Output: line one\nline two\nError: it was slow\nExit Code: 3\nSignal: SIGTERM\nBackground PIDs: 111, 222\nProcess Group PGID: 4242' })),
+      gm.call('run_shell_command', { command: 'npm run build' }, 'success', min(19), gm.shellResult(long, 1)),
+    ]),
+  ] });
+  const [s] = await read(h);
+  // Only the exit code, the background processes and the process group are Gemini's. The rest is what the command said.
+  expect(shellCommands(s).map((c) => c.output)).toEqual(['line one\nline two\nError: it was slow\nSignal: SIGTERM', 'x'.repeat(3_996) + 'TAIL']);
+});
+
+test('Gemini\'s label in front of the output is not part of it, so a one-line failure is that line', async () => {
+  const h = fakeHome();
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', messages: [
+    gm.user('read the notes', min(30)),
+    gm.say('', min(20), [
+      gm.call('run_shell_command', { command: 'cat notes.md' }, 'success', min(20), gm.shellResult('cat: notes.md: No such file or directory', 1)),
+      gm.call('run_shell_command', { command: 'echo Output: 42' }, 'success', min(19), gm.shellResult('Output: 42')), // the command's own text may say it too
+      gm.call('run_shell_command', { command: 'pwd' }, 'success', min(18), respond({ output: 'no label at all\nExit Code: 1' })),
+    ]),
+    gm.say('There are no notes.', min(10)),
+  ] });
+  const [s] = await read(h);
+  expect(shellCommands(s).map((c) => c.output)).toEqual(['cat: notes.md: No such file or directory', 'Output: 42', 'no label at all']);
+});
+
+test('a command that printed nothing has no output, so its failure names the command', async () => {
+  const h = fakeHome();
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', messages: [
+    gm.user('is it there', min(30)),
+    // Gemini's own placeholder for a command that printed nothing
+    gm.say('', min(20), [gm.call('run_shell_command', { command: 'grep -q TODO notes.md' }, 'success', min(20), gm.shellResult('(empty)', 1))]),
+    gm.say('It is not.', min(10)),
+  ] });
+  const [s] = await read(h);
+  expect(shellCommands(s).map((c) => c.output)).toEqual(['']);
+  expect(classify(s, NOW)).toMatchObject({ status: 'failed', detail: 'grep -q TODO notes.md failed' });
+});
+
+test('the output and error strings of every part of a result are joined with newlines', async () => {
+  const h = fakeHome();
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', messages: [
+    gm.user('run it', min(30)),
+    gm.say('', min(20), [gm.call('run_shell_command', { command: 'make' }, 'success', min(20),
+      [...respond({ output: 'Output: one' }), ...respond({ output: 'two', error: 'three' }), ...respond({ error: 'four\nExit Code: 2' })])]),
+  ] });
+  const [s] = await read(h);
+  expect(shellCommands(s)).toEqual([{ kind: 'command', at: min(20), command: 'make', ok: false, output: 'one\ntwo\nthree\nfour' }]);
+});
+
+test('a shell result of the wrong shape means no output, and never fails the read', async () => {
+  const h = fakeHome();
+  const results: unknown[] = [
+    undefined, null, 'text', 7, {}, [], [null], [3], ['x'], [{}], [{ functionResponse: null }], [{ functionResponse: 'x' }],
+    [{ functionResponse: {} }], respond(null), respond('x'), respond({}), respond({ output: 5, error: {} }),
+  ];
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', messages: [
+    gm.user('try things', min(30)),
+    gm.say('', min(20), results.map((result, i) => ({ ...gm.call('run_shell_command', { command: `cmd ${i}` }, 'success', min(20)), result }))),
+  ] });
+  const [s] = await read(h);
+  expect(shellCommands(s).map((c) => [c.ok, c.output])).toEqual(results.map(() => [true, '']));
+});
+
 // ---- the status each kind of session reads as
 
 test('a chat that ended after a failed command stopped there, and says which command', async () => {

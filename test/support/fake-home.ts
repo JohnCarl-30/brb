@@ -121,13 +121,17 @@ export function writeCodexSession(h: FakeHome, o: { id: string; lines: object[];
 
 // ---- Gemini CLI: <gemini>/tmp/<project folder>/chats/session-<YYYY-MM-DDTHH-MM>-<first 8 of the id>.json
 // The project's path is in <gemini>/tmp/<project folder>/.project_root. A chat is one JSON document that the CLI
-// rewrites whole as the conversation goes on, with every message in `messages`. The message and tool-call shapes
-// follow the plan's description of the format; they have not been checked against a real chat file.
+// rewrites whole as the conversation goes on, with every message in `messages`. The shapes were count-checked on
+// 2026-11-06 against the owner's older chats (field names and labels only, no content read).
 
 export const gm = {
   user: (text: string, at: number) => ({ id: `m${at}`, timestamp: iso(at), type: 'user', content: [{ text }] }),
   say: (text: string, at: number, toolCalls?: object[]) => ({ id: `g${at}`, timestamp: iso(at), type: 'gemini', content: text, ...(toolCalls ? { toolCalls } : {}) }),
-  call: (name: string, args: object, status: 'success' | 'error' | 'cancelled', at: number) => ({ id: `c${at}`, name, args, status, timestamp: iso(at), result: [] }),
+  call: (name: string, args: object, status: 'success' | 'error' | 'cancelled', at: number, result: object[] = []) => ({ id: `c${at}`, name, args, status, timestamp: iso(at), result }),
+  // What Gemini keeps of a shell command, as the `result` of its call: one string with lines of Gemini's own around what the
+  // command printed. `Exit Code` is there only when the command exited with something other than 0, and the call's status
+  // is `success` whatever the exit code.
+  shellResult: (output: string, exitCode = 0) => [{ functionResponse: { id: 'run_shell_command_1', name: 'run_shell_command', response: { output: [`Output: ${output}`, ...(exitCode === 0 ? [] : [`Exit Code: ${exitCode}`]), 'Process Group PGID: 4242'].join('\n') } } }],
   info: (text: string, at: number) => ({ id: `i${at}`, timestamp: iso(at), type: 'info', content: text }),
   error: (text: string, at: number) => ({ id: `e${at}`, timestamp: iso(at), type: 'error', content: text }), // an error the CLI recorded
 };
