@@ -10,8 +10,9 @@ const OUTPUT_KEEP_CHARS = 4_000;
 const INTERRUPT_PREFIX = '[Request interrupted by user';
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const ASK_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
-// Prompts the system sent for a background task or a schedule are not the human talking.
-const NOT_HUMAN_ORIGINS = new Set(['task_notification', 'scheduled']);
+// Prompts the system sent for a background task or a schedule, or another Claude session sent as a peer,
+// are not the human talking. Queued prompts and accepted suggestions are.
+const NOT_HUMAN_ORIGINS = new Set(['task_notification', 'scheduled', 'peer']);
 
 // A tool call whose result may still come. `inTail` says which side of a skipped middle section its line was on.
 interface ToolUse { name: string; input: any; at: number; inTail: boolean }
@@ -26,6 +27,7 @@ interface Transcript {
   branch?: string;
   customTitle?: string;
   agentName?: string;
+  aiTitle?: string;
   humanPromptInTail: boolean;
 }
 
@@ -89,6 +91,7 @@ function addLine(t: Transcript, line: any, inTail: boolean): void {
 
   if (line.type === 'custom-title') t.customTitle = str(line.customTitle) ?? t.customTitle;
   if (line.type === 'agent-name') t.agentName = str(line.agentName) ?? t.agentName;
+  if (line.type === 'ai-title') t.aiTitle = str(line.aiTitle) ?? t.aiTitle;
 
   const at = typeof line.timestamp === 'string' ? Date.parse(line.timestamp) : NaN;
   if (Number.isNaN(at)) return;
@@ -111,6 +114,16 @@ function addUnansweredAsks(t: Transcript, skippedMiddle: boolean): void {
   }
 }
 
+// The first of the custom title, the agent name, Claude's own ai-title and the first prompt that says anything.
+function titleOf(t: Transcript): string {
+  const firstPrompt = t.events.find((e) => e.kind === 'user');
+  for (const candidate of [t.customTitle, t.agentName, t.aiTitle, firstPrompt?.kind === 'user' ? firstPrompt.text : undefined]) {
+    const title = oneLine(candidate ?? '', TITLE_MAX);
+    if (title) return title;
+  }
+  return 'untitled session';
+}
+
 async function readSession(file: RecentFile): Promise<Session | null> {
   const { lines, tailStart } = await readHeadTail(file.path);
   const t: Transcript = { events: [], toolUses: new Map(), answered: new Set(), humanPromptInTail: false };
@@ -123,16 +136,11 @@ async function readSession(file: RecentFile): Promise<Session | null> {
   addUnansweredAsks(t, tailStart !== null);
   t.events.sort((a, b) => a.at - b.at); // stable, so events with the same time keep the order they were written in
 
-  const firstPrompt = t.events.find((e) => e.kind === 'user');
-  const title = oneLine(t.customTitle ?? '', TITLE_MAX)
-    || oneLine(t.agentName ?? '', TITLE_MAX)
-    || oneLine(firstPrompt?.kind === 'user' ? firstPrompt.text : '', TITLE_MAX)
-    || 'untitled session';
   const session: Session = {
     tool: 'claude',
     id: t.sessionId ?? basename(file.path, '.jsonl'),
     cwd: t.cwd,
-    title,
+    title: titleOf(t),
     events: t.events,
     lastActivityAt: t.events.at(-1)?.at ?? file.mtimeMs,
   };

@@ -101,6 +101,63 @@ test('also skips scheduled runs, system prompts and meta lines', async () => {
   expect(s.events).toEqual([{ kind: 'user', at: min(30), text: 'fix the login bug' }]);
 });
 
+test('a prompt from a peer session is not the human talking, and does not end the turn', async () => {
+  const h = fakeHome();
+  writeClaudeSession(h, { id: 'c1', cwd: '/w/app', lines: [
+    cl.user('add a rate limiter', min(30)),
+    cl.tool('w1', 'Write', { file_path: '/w/app/src/rateLimit.ts' }, min(29)),
+    cl.result('w1', 'File created successfully', min(28)),
+    { ...cl.user('a note from the other session', min(27)), turnOrigin: 'peer' },
+    { ...cl.user('another, written the way real files do', min(26)), promptSource: 'system', turnOrigin: 'peer' },
+    cl.say('Added the limiter. Want me to add tests too?', min(25)),
+  ] });
+  const [s] = await read(h);
+  expect(kinds(s)).toEqual(['user', 'edit', 'agent', 'turn-end']);
+  expect(s.events[0]).toEqual({ kind: 'user', at: min(30), text: 'add a rate limiter' }); // still where the turn starts
+  // Were a peer prompt a new turn, the edit would fall outside it and the closing question would read as waiting.
+  expect(classify(s, NOW).status).toBe('finished');
+});
+
+test('a peer prompt after the last reply does not reopen the turn', async () => {
+  const h = fakeHome();
+  writeClaudeSession(h, { id: 'c1', cwd: '/w/app', lines: [
+    cl.user('fix the login bug', min(30)),
+    cl.say('Done.', min(25)),
+    { ...cl.user('a note from the other session', min(20)), turnOrigin: 'peer' },
+  ] });
+  const [s] = await read(h);
+  expect(kinds(s)).toEqual(['user', 'agent', 'turn-end']);
+  expect(s.lastActivityAt).toBe(min(25));
+  expect(classify(s, NOW)).toMatchObject({ status: 'finished', detail: 'Done.' });
+});
+
+test('a peer prompt does not make the last turn of a long session look fully read', async () => {
+  const h = fakeHome();
+  writeClaudeSession(h, { id: 'c1', cwd: '/w/app', filler: FILLER, lines: [
+    cl.user('fix the login bug', min(90)),
+    { ...cl.user('a note from the other session', min(3)), turnOrigin: 'peer' },
+    cl.say('Want me to add tests too?', min(2)),
+  ] });
+  const [s] = await read(h);
+  expect(s.partialTurn).toBe(true); // the human prompt is still outside the read window
+  expect(classify(s, NOW).status).toBe('finished');
+});
+
+test('queued prompts, accepted suggestions and prompts sent through the SDK are still the human talking', async () => {
+  const h = fakeHome();
+  writeClaudeSession(h, { id: 'c1', cwd: '/w/app', lines: [
+    { ...cl.user('run the tests', min(20)), promptSource: 'suggestion_accepted' },
+    { ...cl.user('and update the docs', min(19)), promptSource: 'queued' },
+    { ...cl.user('then open a PR', min(18)), promptSource: 'sdk', turnOrigin: 'sdk' },
+  ] });
+  const [s] = await read(h);
+  expect(s.events).toEqual([
+    { kind: 'user', at: min(20), text: 'run the tests' },
+    { kind: 'user', at: min(19), text: 'and update the docs' },
+    { kind: 'user', at: min(18), text: 'then open a PR' },
+  ]);
+});
+
 test('treats an interrupt and an API error as errors', async () => {
   const h = fakeHome();
   writeClaudeSession(h, { id: 'c1', cwd: '/w/app', lines: [
@@ -315,6 +372,49 @@ test('names a session by its custom title, then its agent name, then its first p
   expect(byId(sessions, 'long').title).toBe('a'.repeat(59) + '…');
   expect(byId(sessions, 'messy-custom').title).toBe('bold name ' + 'z'.repeat(49) + '…');
   expect(byId(sessions, 'messy-agent').title).toBe('two lines');
+});
+
+// The full order of a title: custom title, agent name, ai-title, first prompt.
+test('an ai-title names a session that has no custom title or agent name', async () => {
+  const h = fakeHome();
+  const prompt = cl.user('fix the login bug', min(30));
+  writeClaudeSession(h, { id: 'ai', cwd: '/w/ai', lines: [prompt, cl.aiTitle('Fix login redirect loop')] });
+  writeClaudeSession(h, { id: 'last', cwd: '/w/last', lines: [prompt, cl.aiTitle('First guess'), cl.aiTitle('Better title'), cl.aiTitle('')] });
+  writeClaudeSession(h, { id: 'messy', cwd: '/w/messy', lines: [prompt, cl.aiTitle(`\x1b[1mbold\x1b[0m title\n${'z'.repeat(80)}`)] });
+  writeClaudeSession(h, { id: 'empty', cwd: '/w/empty', lines: [prompt, cl.aiTitle('')] });
+  writeClaudeSession(h, { id: 'invisible', cwd: '/w/invisible', lines: [prompt, cl.aiTitle('\x1b[0m')] });
+  const sessions = await read(h);
+  expect(byId(sessions, 'ai').title).toBe('Fix login redirect loop'); // ahead of the first prompt
+  expect(byId(sessions, 'last').title).toBe('Better title'); // the last one wins, and a blank one after it does not erase it
+  expect(byId(sessions, 'messy').title).toBe('bold title ' + 'z'.repeat(48) + '…'); // cleaned and cut like any title
+  expect(byId(sessions, 'empty').title).toBe('fix the login bug'); // an empty one names nothing
+  expect(byId(sessions, 'invisible').title).toBe('fix the login bug'); // nor does one that is empty once cleaned
+});
+
+test('a custom title or an agent name beats an ai-title, wherever the lines sit', async () => {
+  const h = fakeHome();
+  const prompt = cl.user('fix the login bug', min(30));
+  writeClaudeSession(h, { id: 'custom-first', cwd: '/w/a', lines: [prompt, cl.title('chosen name'), cl.aiTitle('generated')] });
+  writeClaudeSession(h, { id: 'custom-last', cwd: '/w/b', lines: [prompt, cl.aiTitle('generated'), cl.title('chosen name')] });
+  writeClaudeSession(h, { id: 'agent', cwd: '/w/c', lines: [prompt, cl.aiTitle('generated'), { type: 'agent-name', agentName: 'builder' }] });
+  const sessions = await read(h);
+  expect(byId(sessions, 'custom-first').title).toBe('chosen name');
+  expect(byId(sessions, 'custom-last').title).toBe('chosen name');
+  expect(byId(sessions, 'agent').title).toBe('builder');
+});
+
+test('names a long session from its ai-title when its first prompt was never read', async () => {
+  const h = fakeHome();
+  // The first prompt sits after the head window and before the tail window, so only the ai-title line is read.
+  writeClaudeSession(h, { id: 'long', cwd: '/w/app', filler: 20_000, lines: [
+    { type: 'attachment' },
+    cl.user('fix the login bug', min(99)),
+    cl.result('pad', 'x'.repeat(70_000), min(98)),
+    cl.aiTitle('Fix login redirect loop'),
+  ] });
+  const [s] = await read(h);
+  expect(s.events).toEqual([]); // the prompt really was not read
+  expect(s.title).toBe('Fix login redirect loop');
 });
 
 test('takes the folder and branch from the last lines, and no branch from a detached HEAD', async () => {

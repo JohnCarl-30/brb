@@ -23,6 +23,7 @@ export const cl = {
   tool: (id: string, name: string, input: object, at: number) => ({ type: 'assistant', timestamp: iso(at), message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input }], stop_reason: 'tool_use' } }),
   result: (id: string, content: string, at: number, isError = false) => ({ type: 'user', timestamp: iso(at), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] } }),
   title: (customTitle: string) => ({ type: 'custom-title', customTitle }),
+  aiTitle: (aiTitle: string) => ({ type: 'ai-title', aiTitle }), // the title Claude Code writes itself, repeatedly, with no timestamp
   apiError: (at: number) => ({ type: 'system', subtype: 'api_error', timestamp: iso(at) }),
 };
 
