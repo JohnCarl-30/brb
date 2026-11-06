@@ -5,7 +5,7 @@ Everything here is for the owner. Nothing in this repo posts, publishes or opens
 ## Before launch day
 
 - [ ] The repo is public and `docs/demo.gif` shows in the README.
-- [ ] `brb` is published to npm, and `npx brb` works on a machine that has never seen it.
+- [ ] `@john_carl/brb` is published to npm, and `npx @john_carl/brb` works on a machine that has never seen it.
 - [ ] `/plugin marketplace add JohnCarl-30/brb` and `/plugin install brb@brb` work in a fresh Claude Code.
 - [ ] Verify each awesome list below exists and read its contributing rules first.
 - [ ] Open the awesome-list pull requests:

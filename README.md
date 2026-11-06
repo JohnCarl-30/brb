@@ -7,10 +7,10 @@ Step away from your AI coding sessions. When you're back, `brb` shows you everyt
 ## Run it
 
 ```
-npx brb
+npx @john_carl/brb
 ```
 
-No install, no API key, no config.
+No install, no API key, no config. To keep it around, `npm i -g @john_carl/brb` and then just run `brb`.
 
 ## What you see
 
@@ -55,7 +55,7 @@ It needs Node 20 or newer on your PATH.
 Codex and Gemini CLI users can give their agent the same briefing. Add a line like this to `AGENTS.md` or `GEMINI.md`:
 
 ```
-Run `npx brb --brief` before starting a task.
+Run `npx @john_carl/brb --brief` before starting a task.
 ```
 
 `--brief` prints a few plain-text lines about the other sessions in the project, and nothing when there is nothing to report. `--json` prints the whole catch-up for scripts.
