@@ -10,9 +10,9 @@ const OUTPUT_KEEP_CHARS = 4_000;
 const INTERRUPT_PREFIX = '[Request interrupted by user';
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const ASK_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
-// Prompts the system sent for a background task or a schedule, or another Claude session sent as a peer,
-// are not the human talking. Queued prompts and accepted suggestions are.
-const NOT_HUMAN_ORIGINS = new Set(['task_notification', 'scheduled', 'peer']);
+// Prompts the system sent for a background task or a schedule, that it wrote itself, or that another Claude
+// session sent as a peer are not the human talking. Queued prompts and accepted suggestions are.
+const NOT_HUMAN_ORIGINS = new Set(['task_notification', 'scheduled', 'peer', 'system']);
 
 // A tool call whose result may still come. `inTail` says which side of a skipped middle section its line was on.
 interface ToolUse { name: string; input: any; at: number; inTail: boolean }

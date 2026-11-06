@@ -143,6 +143,21 @@ test('a peer prompt does not make the last turn of a long session look fully rea
   expect(classify(s, NOW).status).toBe('finished');
 });
 
+test('a prompt whose origin is the system, with no prompt source, is not the human talking', async () => {
+  const h = fakeHome();
+  writeClaudeSession(h, { id: 'c1', cwd: '/w/app', lines: [
+    cl.user('add a rate limiter', min(30)),
+    cl.tool('w1', 'Write', { file_path: '/w/app/src/rateLimit.ts' }, min(29)),
+    cl.result('w1', 'File created successfully', min(28)),
+    { ...cl.user('a message the system wrote', min(27)), promptSource: undefined, turnOrigin: 'system' },
+    cl.say('Added the limiter. Want me to add tests too?', min(25)),
+  ] });
+  const [s] = await read(h);
+  expect(kinds(s)).toEqual(['user', 'edit', 'agent', 'turn-end']);
+  // As a turn start it would put the edit outside the turn, and the closing question would read as waiting.
+  expect(classify(s, NOW).status).toBe('finished');
+});
+
 test('queued prompts, accepted suggestions and prompts sent through the SDK are still the human talking', async () => {
   const h = fakeHome();
   writeClaudeSession(h, { id: 'c1', cwd: '/w/app', lines: [
