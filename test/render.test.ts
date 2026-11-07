@@ -140,6 +140,12 @@ test('json leaves out longText', () => {
   expect(parsed.elsewhere[0].longText).toBeUndefined();
 });
 
+test('json leaves out the session file path', () => {
+  const c = scenarioCatchUp();
+  c.elsewhere[0].file = '/h/.claude/projects/x/s.jsonl';
+  expect(renderJson(c)).not.toContain('"file"');
+});
+
 test('pads row numbers so ten or more rows keep their columns', () => {
   const c = scenarioCatchUp();
   c.elsewhere = Array.from({ length: 7 }, () => ({ ...c.elsewhere[0] }));

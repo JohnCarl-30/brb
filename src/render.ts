@@ -5,7 +5,7 @@ import { formatAge } from './time';
 import type { Status } from './types';
 
 const MARK: Record<Status, string> = { waiting: '◐', finished: '●', failed: '✕', working: '◌', idle: '○' };
-const LABEL: Record<Status, (age: string) => string> = {
+export const LABEL: Record<Status, (age: string) => string> = {
   waiting: (age) => `waiting on you · ${age}`,
   finished: (age) => `finished · ${age} ago`,
   failed: (age) => `stopped · ${age} ago`,
@@ -91,7 +91,7 @@ export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number;
     const width = Math.max(...steps.map((s) => s.label.length));
     footer.push(...steps.map((s) => ` ${k.yellow('→')} ${s.label.padEnd(width)}  ${s.command}`));
   }
-  if (numbered && rows > 0) footer.push(k.dim(' brb <number> picks that session back up'));
+  if (numbered && rows > 0) footer.push(k.dim(' brb <number> picks that session back up · brb show <number> opens its recap'));
   if (footer.length > 0) sections.push(footer);
 
   if (c.warnings.length > 0) sections.push(c.warnings.map((w) => k.yellow(` ! ${oneLine(w, LONG)}`)));
@@ -125,5 +125,5 @@ export function renderBrief(c: CatchUp): string {
   return lines.join('\n');
 }
 
-// longText is the source for an AI one-liner, not something to hand to other programs.
-export const renderJson = (c: CatchUp): string => JSON.stringify(c, (key, value) => (key === 'longText' ? undefined : value), 2);
+// longText is the source for an AI one-liner and file is where a recap reads from, not things to hand to other programs.
+export const renderJson = (c: CatchUp): string => JSON.stringify(c, (key, value) => (key === 'longText' || key === 'file' ? undefined : value), 2);
