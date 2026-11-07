@@ -91,7 +91,7 @@ export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number;
     const width = Math.max(...steps.map((s) => s.label.length));
     footer.push(...steps.map((s) => ` ${k.yellow('→')} ${s.label.padEnd(width)}  ${s.command}`));
   }
-  if (numbered && rows > 0) footer.push(k.dim(' brb <number> picks that session back up'));
+  if (numbered && rows > 0) footer.push(k.dim(' brb <number> picks that session back up · brb show <number> opens its recap'));
   if (footer.length > 0) sections.push(footer);
 
   if (c.warnings.length > 0) sections.push(c.warnings.map((w) => k.yellow(` ! ${oneLine(w, LONG)}`)));

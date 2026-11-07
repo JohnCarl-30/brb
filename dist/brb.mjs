@@ -106,7 +106,7 @@ import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 
 // package.json
-var version = "0.4.0";
+var version = "0.5.0";
 
 // src/adapters/index.ts
 import * as os from "os";
@@ -182,13 +182,13 @@ async function mtimeOf(file) {
 async function recentFiles(dir, name, sinceMs, maxDepth) {
   async function walk(folder, depth) {
     const found = await Promise.all((await listFolder(folder)).map(async (entry) => {
-      const path8 = join(folder, entry.name);
+      const path9 = join(folder, entry.name);
       if (entry.isDirectory()) {
-        return entry.name !== "subagents" && depth < maxDepth ? walk(path8, depth + 1) : [];
+        return entry.name !== "subagents" && depth < maxDepth ? walk(path9, depth + 1) : [];
       }
       if (!entry.isFile() || !name.test(entry.name)) return [];
-      const mtimeMs = await mtimeOf(path8);
-      return mtimeMs !== null && mtimeMs > sinceMs ? [{ path: path8, mtimeMs }] : [];
+      const mtimeMs = await mtimeOf(path9);
+      return mtimeMs !== null && mtimeMs > sinceMs ? [{ path: path9, mtimeMs }] : [];
     }));
     return found.flat();
   }
@@ -205,10 +205,10 @@ async function readRange(handle, position, length) {
   return buffer.toString("utf8", 0, filled);
 }
 var toLines = (text) => text.split("\n").filter((line) => line !== "");
-async function readHeadTail(path8) {
+async function readHeadTail(path9) {
   let handle;
   try {
-    handle = await open(path8, "r");
+    handle = await open(path9, "r");
   } catch (error) {
     if (isMissing(error)) return { lines: [], tailStart: null };
     throw error;
@@ -225,9 +225,9 @@ async function readHeadTail(path8) {
     await handle.close();
   }
 }
-async function readText(path8) {
+async function readText(path9) {
   try {
-    return await readFile(path8, "utf8");
+    return await readFile(path9, "utf8");
   } catch (error) {
     if (isMissing(error)) return null;
     throw error;
@@ -341,8 +341,8 @@ function titleOf(t) {
   }
   return "untitled session";
 }
-async function readSession(file) {
-  const { lines, tailStart } = await readHeadTail(file.path);
+async function readSession(file, whole = false) {
+  const { lines, tailStart } = whole ? { lines: (await readText(file.path) ?? "").split("\n"), tailStart: null } : await readHeadTail(file.path);
   const t = { events: [], toolUses: /* @__PURE__ */ new Map(), answered: /* @__PURE__ */ new Set(), humanPromptInTail: false };
   const headLines = tailStart === null ? lines : lines.slice(0, tailStart);
   for (const line of parseJsonLines(headLines)) addLine(t, line, false);
@@ -356,7 +356,8 @@ async function readSession(file) {
     cwd: t.cwd,
     title: titleOf(t),
     events: t.events,
-    lastActivityAt: t.events.at(-1)?.at ?? file.mtimeMs
+    lastActivityAt: t.events.at(-1)?.at ?? file.mtimeMs,
+    file: file.path
   };
   if (t.branch !== void 0 && t.branch !== "HEAD") session.branch = t.branch;
   if (tailStart !== null && !t.humanPromptInTail) session.partialTurn = true;
@@ -364,7 +365,7 @@ async function readSession(file) {
 }
 async function readClaudeSessions(root, o) {
   const files = await recentFiles(join2(root, "projects"), /\.jsonl$/, o.sinceMs, 2);
-  const sessions = await Promise.all(files.map(readSession));
+  const sessions = await Promise.all(files.map((file) => readSession(file)));
   return sessions.filter((s) => s !== null);
 }
 
@@ -458,7 +459,8 @@ async function readSession2(file, titles) {
     cwd: t.cwd,
     title: titleOf2(t, titles.get(id)),
     events: t.events,
-    lastActivityAt: t.events.at(-1)?.at ?? file.mtimeMs
+    lastActivityAt: t.events.at(-1)?.at ?? file.mtimeMs,
+    file: file.path
   };
 }
 async function readCodexSessions(root, o) {
@@ -547,7 +549,8 @@ async function readSession3(file, cwd) {
     cwd,
     title: oneLine(firstPrompt?.kind === "user" ? firstPrompt.text : "", TITLE_MAX) || "untitled session",
     events,
-    lastActivityAt: events.at(-1)?.at ?? file.mtimeMs
+    lastActivityAt: events.at(-1)?.at ?? file.mtimeMs,
+    file: file.path
   };
 }
 async function readProject(folder, sinceMs) {
@@ -594,6 +597,12 @@ async function loadAllSessions(roots, now) {
     }
   });
   return { sessions, warnings };
+}
+function readSessionFile(tool, file, cwd) {
+  const recent = { path: file, mtimeMs: 0 };
+  if (tool === "claude") return readSession(recent, true);
+  if (tool === "codex") return readSession2(recent, /* @__PURE__ */ new Map());
+  return readSession3(recent, cwd);
 }
 
 // src/compute.ts
@@ -770,7 +779,8 @@ function buildCatchUp(input) {
       branch: s.branch,
       files: editedFiles(s, home),
       resume: resumeFor(s),
-      longText: verdict.longText
+      longText: verdict.longText,
+      file: s.file
     }];
   }).sort(byStatus);
   const hereRows = rows.filter((r) => r.project.key === hereProject.key);
@@ -1035,7 +1045,7 @@ function renderTerminal(c, o) {
     const width = Math.max(...steps.map((s) => s.label.length));
     footer.push(...steps.map((s) => ` ${k.yellow("\u2192")} ${s.label.padEnd(width)}  ${s.command}`));
   }
-  if (numbered && rows > 0) footer.push(k.dim(" brb <number> picks that session back up"));
+  if (numbered && rows > 0) footer.push(k.dim(" brb <number> picks that session back up \xB7 brb show <number> opens its recap"));
   if (footer.length > 0) sections.push(footer);
   if (c.warnings.length > 0) sections.push(c.warnings.map((w) => k.yellow(` ! ${oneLine(w, LONG)}`)));
   return sections.map((lines) => lines.join("\n")).join("\n\n") + "\n";
@@ -1069,7 +1079,7 @@ function renderBrief(c) {
   }
   return lines.join("\n");
 }
-var renderJson = (c) => JSON.stringify(c, (key, value) => key === "longText" ? void 0 : value, 2);
+var renderJson = (c) => JSON.stringify(c, (key, value) => key === "longText" || key === "file" ? void 0 : value, 2);
 
 // src/hooks.ts
 var QUIET = { stdout: "", exitCode: 0 };
@@ -1099,6 +1109,11 @@ async function runHook(name, stdin, o) {
   }
   return QUIET;
 }
+
+// src/recap.ts
+import * as fs5 from "fs";
+import * as os4 from "os";
+import * as path8 from "path";
 
 // src/summarize.ts
 import { execFile } from "child_process";
@@ -1167,17 +1182,19 @@ async function summarizeRows(rows, o) {
     }
   }));
   for (const [key, line] of Object.entries(fresh)) result.set(key, line);
-  if (Object.keys(fresh).length > 0) {
-    try {
-      fs4.mkdirSync(path7.dirname(file), { recursive: true, mode: 448 });
-      fs4.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries({ ...cache2, ...fresh }).slice(-MAX_CACHED))), { mode: 384 });
-    } catch {
-    }
-  }
+  writeCache(file, cache2, fresh);
   return result;
 }
+function writeCache(file, cache2, fresh) {
+  if (Object.keys(fresh).length === 0) return;
+  try {
+    fs4.mkdirSync(path7.dirname(file), { recursive: true, mode: 448 });
+    fs4.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries({ ...cache2, ...fresh }).slice(-MAX_CACHED))), { mode: 384 });
+  } catch {
+  }
+}
 var defaultRunner = (bin, args, o) => new Promise((resolve5) => {
-  const child = execFile(bin, args, { cwd: o.cwd, env: o.env, timeout: o.timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+  const child = execFile(bin, args, { cwd: o.cwd, env: o.env, timeout: o.timeoutMs, maxBuffer: 1024 * 1024, signal: o.signal }, (err, stdout) => {
     resolve5({ code: err === null ? 0 : typeof err.code === "number" ? err.code : 1, stdout });
   });
   child.stdin?.on("error", () => {
@@ -1201,11 +1218,164 @@ function onPath(bin, env) {
   return false;
 }
 
+// src/recap.ts
+var IMAGE_TYPES = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+var BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+var DATA_URL = /^data:(image\/[a-z]+);base64,(.+)$/s;
+var MAX_INPUT = 24e3;
+var MAX_ITEMS = 6;
+var TIMEOUT_MS2 = 9e4;
+var MAX_IMAGE_BYTES = 5e7;
+var KEEP_MS = 7 * 864e5;
+var RECAP_PROMPT = [
+  "Below is an AI coding session: what the developer asked, what the agent said, the commands it ran and the files it edited.",
+  "List what the session built and what it fixed, for its developer. Use only what the text shows; never guess.",
+  `Reply with up to ${MAX_ITEMS} lines "DONE: <what was built>" and up to ${MAX_ITEMS} lines "FIXED: <what was fixed>", each under 15 words, and nothing else.`,
+  "",
+  ""
+].join("\n");
+function imageOf(o) {
+  if (o.type === "image" && o.source?.type === "base64") return { mediaType: o.source.media_type, data: o.source.data };
+  if (o.type === "input_image" && typeof o.image_url === "string") {
+    const m = DATA_URL.exec(o.image_url);
+    return m ? { mediaType: m[1], data: m[2] } : null;
+  }
+  if (typeof o.inlineData === "object" && o.inlineData !== null) return { mediaType: o.inlineData.mimeType, data: o.inlineData.data };
+  return null;
+}
+function findImages(text) {
+  let roots = parseJsonLines(text.split("\n"));
+  if (roots.length === 0) {
+    try {
+      roots = [JSON.parse(text)];
+    } catch {
+      return [];
+    }
+  }
+  const found = [];
+  const seen = /* @__PURE__ */ new Set();
+  const stack = [...roots].reverse();
+  while (stack.length > 0) {
+    const value = stack.pop();
+    if (typeof value !== "object" || value === null) continue;
+    const image = Array.isArray(value) ? null : imageOf(value);
+    if (image) {
+      const ok = typeof image.data === "string" && IMAGE_TYPES.has(image.mediaType) && BASE64.test(image.data);
+      if (ok && !seen.has(image.data)) {
+        seen.add(image.data);
+        found.push(image);
+      }
+      continue;
+    }
+    stack.push(...Object.values(value).reverse());
+  }
+  return found;
+}
+function recapInput(s, max = MAX_INPUT) {
+  const lines = s.events.flatMap((e) => {
+    if (e.kind === "user") return [`User: ${e.text}`];
+    if (e.kind === "agent") return [`Agent: ${e.text}`];
+    if (e.kind === "command") return [`$ ${e.command}${e.ok ? "" : " (failed)"}`];
+    if (e.kind === "edit") return [`Edited: ${e.files.join(", ")}`];
+    return [];
+  });
+  return lines.join("\n").slice(-max);
+}
+function parseRecap(reply2) {
+  const recap = { done: [], fixed: [] };
+  for (const line of reply2.split("\n")) {
+    const m = /^\s*[-*]?\s*(DONE|FIXED):\s*(.+)$/i.exec(line);
+    if (!m) continue;
+    const list2 = m[1].toUpperCase() === "DONE" ? recap.done : recap.fixed;
+    const item = oneLine(m[2], 200);
+    if (item !== "" && list2.length < MAX_ITEMS) list2.push(item);
+  }
+  return recap.done.length + recap.fixed.length === 0 ? null : recap;
+}
+function lastMessages(s, n = MAX_ITEMS) {
+  return s.events.flatMap((e) => e.kind === "user" ? [`You: ${e.text}`] : e.kind === "agent" ? [`${TOOL_NAME[s.tool]}: ${e.text}`] : []).slice(-n).map((m) => oneLine(m, 500));
+}
+var esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+var list = (heading, items) => items.length === 0 ? "" : `<section><h2>${heading}</h2><ul>${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul></section>`;
+var STYLE = `
+:root { color-scheme: light dark; --dim: #6b7280; --line: #d1d5db; }
+@media (prefers-color-scheme: dark) { :root { --dim: #9ca3af; --line: #374151; } }
+body { font: 16px/1.5 system-ui, sans-serif; margin: 0; }
+main { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; }
+.meta { color: var(--dim); margin: 0; }
+h1 { font-size: 26px; margin: 4px 0 24px; overflow-wrap: anywhere; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 28px 0 8px; }
+ul { margin: 0; padding-left: 20px; } li { margin: 4px 0; overflow-wrap: anywhere; }
+img { display: block; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; margin: 0 0 16px; }
+pre { padding: 12px; border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; }
+`;
+function renderRecapHtml(r, now, body) {
+  const status = LABEL[r.status](formatAge(now - r.at));
+  const sections = body.recap ? list("Done", body.recap.done) + list("Fixed", body.recap.fixed) : list("Last messages", body.messages);
+  const hidden = body.hiddenImages > 0 ? `<p class="meta">${body.hiddenImages} more screenshots not shown</p>` : "";
+  const shots = body.images.length + body.hiddenImages === 0 ? "" : `<section><h2>Screenshots</h2>${body.images.map((i) => `<img src="data:${i.mediaType};base64,${i.data}" alt="">`).join("")}${hidden}</section>`;
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(r.title)} \xB7 brb recap</title><style>${STYLE}</style></head>
+<body><main>
+<p class="meta">${esc(r.project.name)} \xB7 ${TOOL_NAME[r.tool]} \xB7 ${esc(status)}</p>
+<h1>${esc(r.title)}</h1>
+${sections}${shots}
+<section><h2>Pick it back up</h2><pre><code>${esc(commandText(r.resume))}</code></pre></section>
+</main></body></html>
+`;
+}
+async function askRecap(r, s, o) {
+  if (!o.ai) return null;
+  const file = path8.join(o.brbHome, "cache", "recaps.json");
+  const cache2 = readCache(file);
+  const cached = cache2[summaryKey(r)];
+  if (cached !== void 0) return parseRecap(cached);
+  const { bin, args } = commandFor(r.tool, RECAP_PROMPT + recapInput(s));
+  const cwd = path8.join(o.tmpDir ?? os4.tmpdir(), "brb-summaries");
+  if (!o.which(bin) || !privateFolder(cwd)) return null;
+  try {
+    const { code, stdout } = await o.runner(bin, args, { cwd, env: { ...o.env, BRB_INTERNAL: "1" }, timeoutMs: TIMEOUT_MS2, signal: o.signal });
+    const recap = code === 0 ? parseRecap(stdout) : null;
+    if (recap) writeCache(file, cache2, { [summaryKey(r)]: stdout });
+    return recap;
+  } catch {
+    return null;
+  }
+}
+async function writeRecap(r, o) {
+  if (r.file === void 0) throw new Error("this session has no history file to recap");
+  const text = await readText(r.file) ?? "";
+  const s = await readSessionFile(r.tool, r.file, r.cwd) ?? { tool: r.tool, id: r.sessionId, cwd: r.cwd, title: r.title, events: [], lastActivityAt: r.at };
+  const all = findImages(text);
+  let bytes = 0;
+  const images = all.filter((image) => (bytes += image.data.length) <= MAX_IMAGE_BYTES);
+  const hiddenImages = all.length - images.length;
+  const recap = await askRecap(r, s, o);
+  const html = renderRecapHtml(r, o.now, { recap, messages: recap ? [] : lastMessages(s), images, hiddenImages });
+  const dir = path8.join(o.brbHome, "recaps");
+  fs5.mkdirSync(dir, { recursive: true, mode: 448 });
+  for (const name of fs5.readdirSync(dir)) {
+    const page2 = path8.join(dir, name);
+    try {
+      if (name.endsWith(".html") && fs5.statSync(page2).mtimeMs < o.now - KEEP_MS) fs5.rmSync(page2);
+    } catch {
+    }
+  }
+  const page = path8.join(dir, `${r.tool}-${r.sessionId.replace(/[/\\]/g, "_")}.html`);
+  fs5.writeFileSync(page, html, { mode: 384 });
+  fs5.chmodSync(page, 384);
+  return page;
+}
+
 // src/cli.ts
 var HELP = `brb: catch up on every AI coding session when you're back
 
 Usage: brb [options]
-       brb <number>     resume that session from the list
+       brb <number>      resume that session from the list
+       brb show <number> open that session's recap in your browser
 
   --all            show every session, detail and resume command
   --since <time>   look back this far, e.g. 30m, 2h, 1d
@@ -1249,13 +1419,29 @@ async function run(o) {
 `, exitCode: 0 };
   const sinceMs = values.since === void 0 ? void 0 : parseSince(values.since);
   if (sinceMs === null) return fail("--since takes a time like 30m, 2h or 1d");
-  const [pick, ...extra] = positionals;
-  if (extra.length > 0 || pick !== void 0 && !/^[1-9]\d*$/.test(pick)) return fail("give one session number, e.g. brb 2");
+  const show = positionals[0] === "show";
+  const [pick, ...extra] = show ? positionals.slice(1) : positionals;
+  const isNumber = pick !== void 0 && /^[1-9]\d*$/.test(pick);
+  if (show && (extra.length > 0 || !isNumber)) return fail("give one session number, e.g. brb show 2");
+  if (show && (values.json || values.brief)) return fail("brb show makes a page, so it takes no --json or --brief");
+  if (extra.length > 0 || pick !== void 0 && !isNumber) return fail("give one session number, e.g. brb 2");
   const c = await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs });
+  const listed = [...c.here?.rows ?? [], ...shownElsewhere(c, values.all ?? false)];
+  const noAi = values["no-ai"] || o.env.BRB_NO_AI === "1";
+  const recap = (n, signal) => writeRecap(listed[n - 1], {
+    brbHome: resolveRoots(o.env).brb,
+    now: o.now,
+    env: o.env,
+    ai: o.isTTY && !noAi,
+    signal,
+    tmpDir: o.tmpDir,
+    runner: o.runner ?? defaultRunner,
+    which: o.which ?? ((bin) => onPath(bin, o.env))
+  });
   if (pick !== void 0) {
-    const rows = [...c.here?.rows ?? [], ...shownElsewhere(c, values.all ?? false)];
-    const row = rows[Number(pick) - 1];
-    if (!row) return fail(rows.length === 0 ? "no sessions to pick up" : `no session ${pick}: pick 1 to ${rows.length}`);
+    const row = listed[Number(pick) - 1];
+    if (!row) return fail(listed.length === 0 ? "no sessions to pick up" : `no session ${pick}: pick 1 to ${listed.length}`);
+    if (show) return { stdout: "", exitCode: 0, recap, show: Number(pick) };
     return { stdout: `\u2192 ${commandText(row.resume)}
 `, exitCode: 0, exec: o.isTTY ? row.resume : void 0 };
   }
@@ -1267,9 +1453,9 @@ async function run(o) {
   const color = !values["no-color"] && o.isTTY && !("NO_COLOR" in o.env);
   const view = { color, columns: o.columns ?? 100, all: values.all ?? false, numbered: values.exclude === void 0 };
   const stdout = renderTerminal(c, view);
-  const listed = [...c.here?.rows ?? [], ...shownElsewhere(c, view.all)];
   const choices = o.isTTY && view.numbered && listed.length > 0 ? listed.map((r) => r.resume) : void 0;
-  if (!o.isTTY || values["no-ai"] || o.env.BRB_NO_AI === "1") return { stdout, exitCode: 0, choices };
+  const picks = choices ? { choices, recap } : {};
+  if (!o.isTTY || noAi) return { stdout, exitCode: 0, ...picks };
   const rerender = async () => {
     const rows = [...c.here?.rows ?? [], ...view.all ? c.elsewhere : []];
     const summaries = await summarizeRows(rows, {
@@ -1283,7 +1469,7 @@ async function run(o) {
     for (const r of rows) r.summary = summaries.get(summaryKey(r));
     return renderTerminal(c, view);
   };
-  return { stdout, exitCode: 0, rerender, choices, pending: import_picocolors2.default.createColors(color).dim("summarizing\u2026 (Ctrl-C to skip)") };
+  return { stdout, exitCode: 0, rerender, ...picks, pending: import_picocolors2.default.createColors(color).dim("summarizing\u2026 (Ctrl-C to skip)") };
 }
 function redraw(shown, next, rows, columns = Infinity) {
   const width = (line) => line.replace(/\x1b\[[0-9;]*m/g, "").length;
@@ -1293,26 +1479,38 @@ function redraw(shown, next, rows, columns = Infinity) {
 function parsePick(answer, count) {
   const a = answer.trim().toLowerCase();
   if (a === "" || a === "q") return "quit";
-  const n = /^\d+$/.test(a) ? Number(a) : 0;
-  return n >= 1 && n <= count ? n : "again";
+  const m = /^(s\s*)?(\d+)$/.exec(a);
+  const n = m ? Number(m[2]) : 0;
+  if (n < 1 || n > count) return "again";
+  return m[1] ? { show: n } : n;
 }
-async function askPick(choices) {
+async function askPick(count) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const cancel = new AbortController();
   rl.on("SIGINT", () => rl.close());
   rl.on("close", () => cancel.abort());
   try {
-    for (; ; ) {
-      const answer = await rl.question(import_picocolors2.default.dim(` Pick a session (1-${choices.length}), Enter to quit: `), { signal: cancel.signal });
-      const pick = parsePick(answer, choices.length);
-      if (pick === "quit") return void 0;
-      if (pick !== "again") return choices[pick - 1];
-    }
+    return parsePick(await rl.question(import_picocolors2.default.dim(` Pick a session (1-${count}), s<n> for its recap, Enter to quit: `), { signal: cancel.signal }), count);
   } catch {
-    return void 0;
+    return "quit";
   } finally {
     rl.close();
   }
+}
+async function showRecap(recap, n) {
+  const tty = Boolean(process.stdout.isTTY);
+  if (tty) process.stdout.write(`${import_picocolors2.default.dim(" writing recap\u2026 (Ctrl-C to skip)")}
+`);
+  const cancel = new AbortController();
+  const skip = () => cancel.abort();
+  process.on("SIGINT", skip);
+  const page = await recap(n, cancel.signal).finally(() => process.off("SIGINT", skip));
+  if (tty) process.stdout.write(redraw("", null, 0));
+  process.stdout.write(`${tty ? " " : ""}\u2192 recap: ${page}
+`);
+  if (!tty) return;
+  const [bin, ...args] = process.platform === "darwin" ? ["open"] : process.platform === "win32" ? ["cmd", "/c", "start", '""'] : ["xdg-open"];
+  spawnSync(bin, [...args, page], { stdio: "ignore" });
 }
 async function readStdin() {
   if (process.stdin.isTTY) return "";
@@ -1346,11 +1544,20 @@ async function main() {
       process.off("SIGINT", skip);
       process.stdout.write(redraw(result.stdout, next, process.stdout.rows ?? 0, process.stdout.columns));
     }
+    if (result.show !== void 0) await showRecap(result.recap, result.show);
     let command = result.exec;
-    if (result.choices && process.stdin.isTTY) {
-      command = await askPick(result.choices);
-      if (command) process.stdout.write(` \u2192 ${commandText(command)}
+    while (result.choices && process.stdin.isTTY) {
+      const pick = await askPick(result.choices.length);
+      if (pick === "quit") break;
+      if (pick === "again") continue;
+      if (typeof pick === "object") {
+        await showRecap(result.recap, pick.show);
+        continue;
+      }
+      command = result.choices[pick - 1];
+      process.stdout.write(` \u2192 ${commandText(command)}
 `);
+      break;
     }
     if (command) process.exitCode = spawnSync("/bin/sh", ["-c", command], { stdio: "inherit" }).status ?? 1;
   } catch (err) {

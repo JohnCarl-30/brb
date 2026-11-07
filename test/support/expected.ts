@@ -9,7 +9,7 @@ export const IDS = {
 
 export const HERO = "Step away from your AI coding sessions. When you're back, `brb` shows you everything that moved in one screen.";
 export const POSITIONING = "Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus Codex, Gemini and your own edits.";
-export const PRIVACY = "brb reads local files only and makes no network calls of its own. No API key. If you have an AI CLI installed, brb can ask it for one-line summaries, and a session's text only ever goes back to the AI tool it came from. Turn this off with `--no-ai` or `BRB_NO_AI=1`.";
+export const PRIVACY = "brb reads local files only and makes no network calls of its own. No API key. If you have an AI CLI installed, brb can ask it for one-line summaries and session recaps, and a session's text only ever goes back to the AI tool it came from. Turn this off with `--no-ai` or `BRB_NO_AI=1`.";
 
 export const NOW = Date.UTC(2026, 10, 5, 15, 0, 0);
 const at = (m: number) => NOW - m * 60_000;
@@ -79,7 +79,7 @@ export const EXPECTED_TERMINAL = [
   ' → answer Claude                  claude --resume 8f2c1d9e-0000-4000-8000-000000000001',
   ' → see what broke                 codex resume 019a0000-0000-7000-8000-000000000003',
   ' → review "add login rate limit"  git diff main...login-rate-limit',
-  ' brb <number> picks that session back up',
+  ' brb <number> picks that session back up · brb show <number> opens its recap',
 ].join('\n') + '\n';
 
 export const EXPECTED_BRIEF = [

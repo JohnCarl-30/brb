@@ -131,6 +131,47 @@ test('redraw climbs every row a wrapped line takes, colors not counted', () => {
   expect(redraw(`${'x'.repeat(100)}\n`, 'new\n', 24, 100)).toBe('\x1b[2F\x1b[0Jnew\n'); // exactly full: no wrap
 });
 
+test('brb show <number> gives that row\'s recap, and asks no AI without a terminal', async () => {
+  const calls: string[] = [];
+  const result = await run({
+    argv: ['show', '2'], env: { HOME: world.home }, cwd: world.repo, now: NOW, isTTY: false,
+    runner: async (bin) => { calls.push(bin); return { code: 0, stdout: 'DONE: x' }; }, which: () => true, tmpDir: tmp,
+  });
+  expect(result.exitCode).toBe(0);
+  expect(result.show).toBe(2);
+  const page = await result.recap!(2);
+  expect(page).toBe(path.join(world.home, '.brb', 'recaps', `claude-${IDS.done}.html`));
+  expect(fs.readFileSync(page, 'utf8')).toContain('Last messages');
+  expect(calls).toEqual([]);
+});
+
+test('brb show rejects a missing or unlisted number, and --json or --brief', async () => {
+  const cases: [string[], string][] = [
+    [['show', '9'], 'no session 9: pick 1 to 4'],
+    [['show'], 'give one session number, e.g. brb show 2'],
+    [['show', 'x'], 'give one session number, e.g. brb show 2'],
+    [['show', '1', '--json'], 'brb show makes a page, so it takes no --json or --brief'],
+    [['show', '1', '--brief'], 'brb show makes a page, so it takes no --json or --brief'],
+  ];
+  for (const [argv, message] of cases) {
+    const { stdout, exitCode } = await brb(argv);
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe(`brb: ${message}\nRun brb --help for usage.\n`);
+  }
+});
+
+test('the list in a terminal can write any listed row\'s recap', async () => {
+  const { recap } = await run({ argv: ['--no-ai'], env: { HOME: world.home }, cwd: world.repo, now: NOW, isTTY: true });
+  expect(await recap!(1)).toBe(path.join(world.home, '.brb', 'recaps', `claude-${IDS.wait}.html`));
+});
+
+test('parsePick takes s<number> for a recap', () => {
+  expect(parsePick('s2', 3)).toEqual({ show: 2 });
+  expect(parsePick(' S 3 ', 3)).toEqual({ show: 3 });
+  expect(parsePick('s9', 3)).toBe('again');
+  expect(parsePick('s', 3)).toBe('again');
+});
+
 test('parsePick takes a listed number, quits on Enter or q, asks again on anything else', () => {
   expect(parsePick(' 5 ', 29)).toBe(5);
   expect(parsePick('', 29)).toBe('quit');

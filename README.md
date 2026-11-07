@@ -81,6 +81,18 @@ brb prints the command, then runs it. A session from another project gets a `cd`
 - Use the same `--since` and `--all` you used for the list, so the numbers match.
 - `/brb` inside Claude Code shows the list without numbers, because it leaves out the session you're typing in.
 
+### Session recaps
+
+Before you pick a session back up, see what it actually got through. `brb show 3`, or `s3` at the pick prompt, opens a recap page for that session in your browser:
+
+- **Done** and **Fixed**: short lists of what the session built and what it fixed, written by the session's own AI tool, the same way as the summaries below.
+- **Screenshots**: every image already in the session, both the ones you pasted and the ones the agent took with its tools.
+- **Pick it back up**: the resume command.
+
+At the pick prompt, brb asks again after opening the page, so you can read it and then pick. Without an AI tool, with `--no-ai`, outside a terminal, or when you press Ctrl-C while it's writing, the page shows the session's last few messages in place of Done and Fixed. The screenshots still show.
+
+Each page is one file at `~/.brb/recaps/<tool>-<session id>.html`, with its screenshots inside it. It runs no script and loads nothing from the internet. brb deletes pages older than 7 days each time it writes one.
+
 ## Why not just `/recap`?
 
 Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus Codex, Gemini and your own edits.
@@ -147,13 +159,15 @@ In a terminal, brb prints the facts first. Then it asks for one-line summaries o
 
 ## Privacy
 
-brb reads local files only and makes no network calls of its own. No API key. If you have an AI CLI installed, brb can ask it for one-line summaries, and a session's text only ever goes back to the AI tool it came from. Turn this off with `--no-ai` or `BRB_NO_AI=1`.
+brb reads local files only and makes no network calls of its own. No API key. If you have an AI CLI installed, brb can ask it for one-line summaries and session recaps, and a session's text only ever goes back to the AI tool it came from. Turn this off with `--no-ai` or `BRB_NO_AI=1`.
 
 brb never writes to your tools' history files. It writes only these:
 
 - `~/.brb/cache/summaries.json`, the summary cache.
+- `~/.brb/cache/recaps.json`, the recap cache.
+- `~/.brb/recaps/`, one recap page per session you open with `brb show`, deleted after 7 days.
 - `~/.brb/pending/`, one small file per Claude session blocked on a permission prompt (plugin only).
-- `brb-summaries/` in your temp folder, where summary prompts run.
+- `brb-summaries/` in your temp folder, where summary and recap prompts run.
 
 Session text that brb prints has terminal control codes stripped, so a session can't rewrite your screen.
 
@@ -163,7 +177,8 @@ Session text that brb prints has terminal control codes stripped, so a session c
 brb: catch up on every AI coding session when you're back
 
 Usage: brb [options]
-       brb <number>     resume that session from the list
+       brb <number>      resume that session from the list
+       brb show <number> open that session's recap in your browser
 
   --all            show every session, detail and resume command
   --since <time>   look back this far, e.g. 30m, 2h, 1d
