@@ -6,7 +6,7 @@ import type { Row } from './catchup';
 import { oneLine } from './text';
 import type { Tool } from './types';
 
-export type Runner = (bin: string, args: string[], o: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number }) => Promise<{ code: number; stdout: string }>;
+export type Runner = (bin: string, args: string[], o: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; signal?: AbortSignal }) => Promise<{ code: number; stdout: string }>;
 
 export const PROMPT = 'Summarize this AI coding session update for its developer in 8 words or fewer. Reply with only the summary.\n\n';
 
@@ -29,7 +29,7 @@ export function commandFor(tool: Tool, prompt: string): { bin: string; args: str
 export const summaryKey = (r: Row): string => `${r.tool}:${r.sessionId}:${r.at}`;
 
 // Missing, unreadable or the wrong shape all mean "nothing cached yet".
-function readCache(file: string): Record<string, string> {
+export function readCache(file: string): Record<string, string> {
   try {
     const data: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (typeof data !== 'object' || data === null || Array.isArray(data)) return {};
@@ -47,7 +47,7 @@ function reply(stdout: string): string {
 // The folder's name is fixed (the adapters skip sessions that ran in it), so on a shared /tmp someone else could plant project
 // config in it (hooks, GEMINI.md) that the user's agentic tools would then obey. Only use a folder that is ours and private.
 // Never chmod or delete one that brb didn't make: an unsafe folder just means no AI.
-function privateFolder(dir: string): boolean {
+export function privateFolder(dir: string): boolean {
   try {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     if (process.platform === 'win32') return true; // no owner or mode bits to check there
@@ -92,22 +92,26 @@ export async function summarizeRows(
   }));
 
   for (const [key, line] of Object.entries(fresh)) result.set(key, line);
-  if (Object.keys(fresh).length > 0) {
-    try {
-      fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); // private: the cache is digests of the user's work
-      // Object keys keep insertion order, so the tail is the newest.
-      fs.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries({ ...cache, ...fresh }).slice(-MAX_CACHED))), { mode: 0o600 });
-    } catch {
-      // the cache is only a speed-up
-    }
-  }
+  writeCache(file, cache, fresh);
   return result;
+}
+
+// Adds `fresh` to a cache file, keeping the newest MAX_CACHED entries.
+export function writeCache(file: string, cache: Record<string, string>, fresh: Record<string, string>): void {
+  if (Object.keys(fresh).length === 0) return;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); // private: the cache is digests of the user's work
+    // Object keys keep insertion order, so the tail is the newest.
+    fs.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries({ ...cache, ...fresh }).slice(-MAX_CACHED))), { mode: 0o600 });
+  } catch {
+    // the cache is only a speed-up
+  }
 }
 
 export const defaultRunner: Runner = (bin, args, o) =>
   new Promise((resolve) => {
-    const child = execFile(bin, args, { cwd: o.cwd, env: o.env, timeout: o.timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout) => {
-      // A non-zero exit has a numeric code. A timeout, a missing program or a full buffer has none, and is a failure too.
+    const child = execFile(bin, args, { cwd: o.cwd, env: o.env, timeout: o.timeoutMs, maxBuffer: 1024 * 1024, signal: o.signal }, (err, stdout) => {
+      // A non-zero exit has a numeric code. A timeout, an abort, a missing program or a full buffer has none, and is a failure too.
       resolve({ code: err === null ? 0 : typeof err.code === 'number' ? err.code : 1, stdout });
     });
     // These tools read piped stdin to the end, so an open pipe would make them wait for input that never comes.

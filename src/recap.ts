@@ -1,8 +1,13 @@
-import { parseJsonLines } from './adapters/files';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { readSessionFile } from './adapters';
+import { parseJsonLines, readText } from './adapters/files';
 import { TOOL_NAME, type Row } from './catchup';
 import { LABEL } from './render';
 import { commandText, oneLine } from './text';
 import { formatAge } from './time';
+import { commandFor, privateFolder, readCache, summaryKey, writeCache, type Runner } from './summarize';
 import type { Session } from './types';
 
 export interface Image { mediaType: string; data: string }
@@ -14,6 +19,9 @@ const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const DATA_URL = /^data:(image\/[a-z]+);base64,(.+)$/s;
 const MAX_INPUT = 24_000;
 const MAX_ITEMS = 6;
+const TIMEOUT_MS = 90_000;
+const MAX_IMAGE_BYTES = 50_000_000;
+const KEEP_MS = 7 * 86_400_000;
 
 export const RECAP_PROMPT = [
   'Below is an AI coding session: what the developer asked, what the agent said, the commands it ran and the files it edited.',
@@ -139,4 +147,60 @@ ${sections}${shots}
 <section><h2>Pick it back up</h2><pre><code>${esc(commandText(r.resume))}</code></pre></section>
 </main></body></html>
 `;
+}
+
+export interface RecapOptions {
+  brbHome: string; now: number; env: NodeJS.ProcessEnv; ai: boolean; runner: Runner; which: (bin: string) => boolean;
+  tmpDir?: string; signal?: AbortSignal;
+}
+
+// The AI's Done and Fixed for a session, from the cache or its own tool, under the same rules as the one-line summaries.
+// Null when it can't or won't answer: then the page shows the last messages.
+async function askRecap(r: Row, s: Session, o: RecapOptions): Promise<Recap | null> {
+  if (!o.ai) return null;
+  const file = path.join(o.brbHome, 'cache', 'recaps.json');
+  const cache = readCache(file);
+  const cached = cache[summaryKey(r)];
+  if (cached !== undefined) return parseRecap(cached);
+  const { bin, args } = commandFor(r.tool, RECAP_PROMPT + recapInput(s));
+  const cwd = path.join(o.tmpDir ?? os.tmpdir(), 'brb-summaries');
+  if (!o.which(bin) || !privateFolder(cwd)) return null;
+  try {
+    const { code, stdout } = await o.runner(bin, args, { cwd, env: { ...o.env, BRB_INTERNAL: '1' }, timeoutMs: TIMEOUT_MS, signal: o.signal });
+    const recap = code === 0 ? parseRecap(stdout) : null;
+    if (recap) writeCache(file, cache, { [summaryKey(r)]: stdout });
+    return recap;
+  } catch {
+    return null;
+  }
+}
+
+// Writes the row's recap page and returns its path. Pages older than 7 days go first, so screenshots don't pile up.
+export async function writeRecap(r: Row, o: RecapOptions): Promise<string> {
+  if (r.file === undefined) throw new Error('this session has no history file to recap');
+  const text = (await readText(r.file)) ?? '';
+  const s = (await readSessionFile(r.tool, r.file, r.cwd)) ?? { tool: r.tool, id: r.sessionId, cwd: r.cwd, title: r.title, events: [], lastActivityAt: r.at };
+
+  // In order until the page would pass MAX_IMAGE_BYTES; the rest are only counted.
+  const all = findImages(text);
+  let bytes = 0;
+  const images = all.filter((image) => (bytes += image.data.length) <= MAX_IMAGE_BYTES);
+  const hiddenImages = all.length - images.length;
+  const recap = await askRecap(r, s, o);
+  const html = renderRecapHtml(r, o.now, { recap, messages: recap ? [] : lastMessages(s), images, hiddenImages });
+
+  const dir = path.join(o.brbHome, 'recaps');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  for (const name of fs.readdirSync(dir)) {
+    const page = path.join(dir, name);
+    try {
+      if (name.endsWith('.html') && fs.statSync(page).mtimeMs < o.now - KEEP_MS) fs.rmSync(page);
+    } catch {
+      // gone already, or not ours to remove
+    }
+  }
+  const page = path.join(dir, `${r.tool}-${r.sessionId.replace(/[/\\]/g, '_')}.html`);
+  fs.writeFileSync(page, html, { mode: 0o600 });
+  fs.chmodSync(page, 0o600); // writeFileSync's mode only applies to a new file
+  return page;
 }
