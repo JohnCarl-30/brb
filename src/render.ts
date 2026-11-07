@@ -5,7 +5,7 @@ import { formatAge } from './time';
 import type { Status } from './types';
 
 const MARK: Record<Status, string> = { waiting: '◐', finished: '●', failed: '✕', working: '◌', idle: '○' };
-const LABEL: Record<Status, (age: string) => string> = {
+export const LABEL: Record<Status, (age: string) => string> = {
   waiting: (age) => `waiting on you · ${age}`,
   finished: (age) => `finished · ${age} ago`,
   failed: (age) => `stopped · ${age} ago`,
