@@ -36,7 +36,7 @@ test('findImages takes each tool\'s image shape, in file order, once each, and s
 
 test('findImages reads a Gemini chat, which is one JSON document', () => {
   const chat = { sessionId: 'g', messages: [{ type: 'user', content: [{ text: 'look' }, { inlineData: { mimeType: 'image/png', data: PNG } }] }] };
-  expect(findImages(JSON.stringify(chat, null, 2))).toEqual([{ mediaType: 'image/png', data: PNG }]);
+  expect(findImages(JSON.stringify(chat, null, 2), true)).toEqual([{ mediaType: 'image/png', data: PNG }]);
 });
 
 test('recapInput keeps the end of a long session', () => {
@@ -128,6 +128,13 @@ describe('writeRecap', () => {
     expect(html).toContain('Last messages');
   });
 
+  test('a session id only ever becomes a plain file name', async () => {
+    const { h, r, tmpDir } = setup();
+    const page = await writeRecap({ ...r, sessionId: 'x&calc& "y"/../z' }, { brbHome: h.brb, now: NOW, env: {}, ai: false, runner: runner(''), which: () => true, tmpDir });
+    expect(path.basename(page)).toBe('claude-x_calc___y__.._z.html');
+    expect(path.dirname(page)).toBe(path.join(h.brb, 'recaps'));
+  });
+
   test('deletes recap pages older than 7 days', async () => {
     const { h, r, tmpDir } = setup();
     const dir = path.join(h.brb, 'recaps');
@@ -142,4 +149,20 @@ describe('writeRecap', () => {
     expect(fs.existsSync(old)).toBe(false);
     expect(fs.existsSync(fresh)).toBe(true);
   });
+});
+
+test('findImages reads a Gemini chat whole even when one of its lines parses alone', () => {
+  const chat = { sessionId: 'g', messages: [{ type: 'user', content: [{ inlineData: { mimeType: 'image/png', data: PNG } }] }, {}] };
+  const text = JSON.stringify(chat, null, 2);
+  expect(text.split('\n')).toContain('    {}'); // a line that is valid JSON by itself
+  expect(findImages(text, true)).toEqual([{ mediaType: 'image/png', data: PNG }]);
+});
+
+test('findImages copes with a huge array in one line', () => {
+  const line = JSON.stringify({ content: Array.from({ length: 200_000 }, (_, i) => i), image: { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } } });
+  expect(findImages(line)).toEqual([{ mediaType: 'image/png', data: PNG }]);
+});
+
+test('parseRecap reads bold and numbered lines and drops "none" items', () => {
+  expect(parseRecap('**DONE:** added x\n1. FIXED: y\nFIXED: none\n- FIXED: N/A.\nDONE: **Nothing**')).toEqual({ done: ['added x'], fixed: ['y'] });
 });

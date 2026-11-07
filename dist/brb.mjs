@@ -100,7 +100,7 @@ var require_picocolors = __commonJS({
 
 // src/cli.ts
 var import_picocolors2 = __toESM(require_picocolors(), 1);
-import { spawnSync } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { createInterface } from "readline/promises";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
@@ -1224,6 +1224,7 @@ var BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 var DATA_URL = /^data:(image\/[a-z]+);base64,(.+)$/s;
 var MAX_INPUT = 24e3;
 var MAX_ITEMS = 6;
+var NOTHING = /^(none|n\/a|nothing)\W*$/i;
 var TIMEOUT_MS2 = 9e4;
 var MAX_IMAGE_BYTES = 5e7;
 var KEEP_MS = 7 * 864e5;
@@ -1243,14 +1244,12 @@ function imageOf(o) {
   if (typeof o.inlineData === "object" && o.inlineData !== null) return { mediaType: o.inlineData.mimeType, data: o.inlineData.data };
   return null;
 }
-function findImages(text) {
-  let roots = parseJsonLines(text.split("\n"));
-  if (roots.length === 0) {
-    try {
-      roots = [JSON.parse(text)];
-    } catch {
-      return [];
-    }
+function findImages(text, wholeDocument = false) {
+  let roots;
+  try {
+    roots = wholeDocument ? [JSON.parse(text)] : parseJsonLines(text.split("\n"));
+  } catch {
+    return [];
   }
   const found = [];
   const seen = /* @__PURE__ */ new Set();
@@ -1267,7 +1266,8 @@ function findImages(text) {
       }
       continue;
     }
-    stack.push(...Object.values(value).reverse());
+    const children = Object.values(value);
+    for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
   }
   return found;
 }
@@ -1284,11 +1284,11 @@ function recapInput(s, max = MAX_INPUT) {
 function parseRecap(reply2) {
   const recap = { done: [], fixed: [] };
   for (const line of reply2.split("\n")) {
-    const m = /^\s*[-*]?\s*(DONE|FIXED):\s*(.+)$/i.exec(line);
+    const m = /^[\s\d.)*-]*(DONE|FIXED)\W*?:\W*(.+)$/i.exec(line.replaceAll("**", ""));
     if (!m) continue;
     const list2 = m[1].toUpperCase() === "DONE" ? recap.done : recap.fixed;
     const item = oneLine(m[2], 200);
-    if (item !== "" && list2.length < MAX_ITEMS) list2.push(item);
+    if (item !== "" && !NOTHING.test(item) && list2.length < MAX_ITEMS) list2.push(item);
   }
   return recap.done.length + recap.fixed.length === 0 ? null : recap;
 }
@@ -1349,7 +1349,7 @@ async function writeRecap(r, o) {
   if (r.file === void 0) throw new Error("this session has no history file to recap");
   const text = await readText(r.file) ?? "";
   const s = await readSessionFile(r.tool, r.file, r.cwd) ?? { tool: r.tool, id: r.sessionId, cwd: r.cwd, title: r.title, events: [], lastActivityAt: r.at };
-  const all = findImages(text);
+  const all = findImages(text, r.tool === "gemini");
   let bytes = 0;
   const images = all.filter((image) => (bytes += image.data.length) <= MAX_IMAGE_BYTES);
   const hiddenImages = all.length - images.length;
@@ -1364,7 +1364,7 @@ async function writeRecap(r, o) {
     } catch {
     }
   }
-  const page = path8.join(dir, `${r.tool}-${r.sessionId.replace(/[/\\]/g, "_")}.html`);
+  const page = path8.join(dir, `${r.tool}-${r.sessionId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}.html`);
   fs5.writeFileSync(page, html, { mode: 384 });
   fs5.chmodSync(page, 384);
   return page;
@@ -1381,7 +1381,7 @@ Usage: brb [options]
   --since <time>   look back this far, e.g. 30m, 2h, 1d
   --json           print the catch-up as JSON
   --brief          short plain-text catch-up for AI agents
-  --no-ai          skip AI one-line summaries
+  --no-ai          skip AI summaries and recaps
   --no-color       plain output
   --exclude <id>   leave out one session
   -v, --version    print the version
@@ -1497,6 +1497,9 @@ async function askPick(count) {
     rl.close();
   }
 }
+function openCommand(platform) {
+  return platform === "darwin" ? ["open"] : platform === "win32" ? ["cmd", "/c", "start", ""] : ["xdg-open"];
+}
 async function showRecap(recap, n) {
   const tty = Boolean(process.stdout.isTTY);
   if (tty) process.stdout.write(`${import_picocolors2.default.dim(" writing recap\u2026 (Ctrl-C to skip)")}
@@ -1504,13 +1507,25 @@ async function showRecap(recap, n) {
   const cancel = new AbortController();
   const skip = () => cancel.abort();
   process.on("SIGINT", skip);
-  const page = await recap(n, cancel.signal).finally(() => process.off("SIGINT", skip));
+  let page;
+  try {
+    page = await recap(n, cancel.signal);
+  } catch (err) {
+    if (tty) process.stdout.write(redraw("", null, 0));
+    process.stdout.write(`brb: couldn't write that recap: ${err instanceof Error ? err.message : String(err)}
+`);
+    return false;
+  } finally {
+    process.off("SIGINT", skip);
+  }
   if (tty) process.stdout.write(redraw("", null, 0));
   process.stdout.write(`${tty ? " " : ""}\u2192 recap: ${page}
 `);
-  if (!tty) return;
-  const [bin, ...args] = process.platform === "darwin" ? ["open"] : process.platform === "win32" ? ["cmd", "/c", "start", '""'] : ["xdg-open"];
-  spawnSync(bin, [...args, page], { stdio: "ignore" });
+  if (!tty) return true;
+  const [bin, ...args] = openCommand(process.platform);
+  spawn(bin, [...args, page], { detached: true, stdio: "ignore" }).on("error", () => {
+  }).unref();
+  return true;
 }
 async function readStdin() {
   if (process.stdin.isTTY) return "";
@@ -1544,7 +1559,7 @@ async function main() {
       process.off("SIGINT", skip);
       process.stdout.write(redraw(result.stdout, next, process.stdout.rows ?? 0, process.stdout.columns));
     }
-    if (result.show !== void 0) await showRecap(result.recap, result.show);
+    if (result.show !== void 0 && !await showRecap(result.recap, result.show)) process.exitCode = 1;
     let command = result.exec;
     while (result.choices && process.stdin.isTTY) {
       const pick = await askPick(result.choices.length);
@@ -1567,7 +1582,9 @@ async function main() {
 if (process.argv[1] && realpath(process.argv[1]) === realpath(fileURLToPath(import.meta.url))) await main();
 export {
   HELP,
+  openCommand,
   parsePick,
   redraw,
-  run
+  run,
+  showRecap
 };

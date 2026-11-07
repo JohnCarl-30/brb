@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import pkg from '../package.json';
-import { HELP, parsePick, redraw, run } from '../src/cli';
+import { HELP, openCommand, parsePick, redraw, run, showRecap } from '../src/cli';
 import { EXPECTED_TERMINAL, IDS, NOW } from './support/expected';
 import { seedScenario } from './support/scenario';
 
@@ -187,4 +187,21 @@ test('a terminal run offers every numbered row to pick from, in screen order', a
   expect((await brb([])).choices).toBeUndefined(); // no terminal
   const excluded = await run({ argv: ['--no-ai', '--exclude', IDS.wait], env: { HOME: world.home }, cwd: world.repo, now: NOW, isTTY: true });
   expect(excluded.choices).toBeUndefined(); // no numbers on screen, so nothing to pick by number
+});
+
+test('a recap that fails says so in one line instead of crashing', async () => {
+  const out: string[] = [];
+  const write = vi.spyOn(process.stdout, 'write').mockImplementation((s) => { out.push(String(s)); return true; });
+  try {
+    expect(await showRecap(async () => { throw new Error('EACCES: permission denied'); }, 1)).toBe(false);
+  } finally {
+    write.mockRestore();
+  }
+  expect(out.join('')).toContain("brb: couldn't write that recap: EACCES: permission denied\n");
+});
+
+test('openCommand opens a page the platform\'s own way', () => {
+  expect(openCommand('darwin')).toEqual(['open']);
+  expect(openCommand('linux')).toEqual(['xdg-open']);
+  expect(openCommand('win32')).toEqual(['cmd', '/c', 'start', '']); // an empty window title, quoted by Node as ""
 });

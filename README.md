@@ -184,7 +184,7 @@ Usage: brb [options]
   --since <time>   look back this far, e.g. 30m, 2h, 1d
   --json           print the catch-up as JSON
   --brief          short plain-text catch-up for AI agents
-  --no-ai          skip AI one-line summaries
+  --no-ai          skip AI summaries and recaps
   --no-color       plain output
   --exclude <id>   leave out one session
   -v, --version    print the version

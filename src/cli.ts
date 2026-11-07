@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -24,7 +24,7 @@ Usage: brb [options]
   --since <time>   look back this far, e.g. 30m, 2h, 1d
   --json           print the catch-up as JSON
   --brief          short plain-text catch-up for AI agents
-  --no-ai          skip AI one-line summaries
+  --no-ai          skip AI summaries and recaps
   --no-color       plain output
   --exclude <id>   leave out one session
   -v, --version    print the version
@@ -155,19 +155,36 @@ async function askPick(count: number): Promise<ReturnType<typeof parsePick>> {
   }
 }
 
+// The command that opens a file in the default browser. `start` takes its first quoted argument as a window title.
+export function openCommand(platform: NodeJS.Platform): string[] {
+  return platform === 'darwin' ? ['open'] : platform === 'win32' ? ['cmd', '/c', 'start', ''] : ['xdg-open'];
+}
+
 // Writes row n's recap (Ctrl-C skips the AI, not the page) and opens it in the browser, or just prints where it is.
-async function showRecap(recap: (n: number, signal?: AbortSignal) => Promise<string>, n: number): Promise<void> {
+// A recap that can't be written is one line of error, not a crash, so the pick prompt goes on. Gives whether it worked.
+export async function showRecap(recap: (n: number, signal?: AbortSignal) => Promise<string>, n: number): Promise<boolean> {
   const tty = Boolean(process.stdout.isTTY);
   if (tty) process.stdout.write(`${pc.dim(' writing recap… (Ctrl-C to skip)')}\n`);
   const cancel = new AbortController();
   const skip = () => cancel.abort();
   process.on('SIGINT', skip);
-  const page = await recap(n, cancel.signal).finally(() => process.off('SIGINT', skip));
-  if (tty) process.stdout.write(redraw('', null, 0)); // the "writing recap" line
+  let page: string;
+  try {
+    page = await recap(n, cancel.signal);
+  } catch (err) {
+    if (tty) process.stdout.write(redraw('', null, 0)); // the "writing recap" line
+    process.stdout.write(`brb: couldn't write that recap: ${err instanceof Error ? err.message : String(err)}\n`);
+    return false;
+  } finally {
+    process.off('SIGINT', skip);
+  }
+  if (tty) process.stdout.write(redraw('', null, 0));
   process.stdout.write(`${tty ? ' ' : ''}→ recap: ${page}\n`);
-  if (!tty) return;
-  const [bin, ...args] = process.platform === 'darwin' ? ['open'] : process.platform === 'win32' ? ['cmd', '/c', 'start', '""'] : ['xdg-open'];
-  spawnSync(bin, [...args, page], { stdio: 'ignore' }); // if it can't open, the path is printed above
+  if (!tty) return true;
+  // Detached, so a browser that xdg-open runs in the foreground doesn't hold the prompt; if it can't open, the path is above.
+  const [bin, ...args] = openCommand(process.platform);
+  spawn(bin, [...args, page], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+  return true;
 }
 
 async function readStdin(): Promise<string> {
@@ -194,7 +211,7 @@ async function main(): Promise<void> {
       process.off('SIGINT', skip);
       process.stdout.write(redraw(result.stdout, next, process.stdout.rows ?? 0, process.stdout.columns));
     }
-    if (result.show !== undefined) await showRecap(result.recap!, result.show);
+    if (result.show !== undefined && !(await showRecap(result.recap!, result.show))) process.exitCode = 1;
     let command = result.exec;
     while (result.choices && process.stdin.isTTY) {
       const pick = await askPick(result.choices.length);

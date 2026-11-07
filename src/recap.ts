@@ -19,6 +19,7 @@ const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const DATA_URL = /^data:(image\/[a-z]+);base64,(.+)$/s;
 const MAX_INPUT = 24_000;
 const MAX_ITEMS = 6;
+const NOTHING = /^(none|n\/a|nothing)\W*$/i;
 const TIMEOUT_MS = 90_000;
 const MAX_IMAGE_BYTES = 50_000_000;
 const KEEP_MS = 7 * 86_400_000;
@@ -44,14 +45,13 @@ function imageOf(o: Record<string, any>): Image | null {
 }
 
 // Every image in a session file's text, in file order, each once (Codex records a pasted image more than once).
-export function findImages(text: string): Image[] {
-  let roots: unknown[] = parseJsonLines(text.split('\n'));
-  if (roots.length === 0) {
-    try {
-      roots = [JSON.parse(text)]; // a Gemini chat is one pretty-printed document
-    } catch {
-      return [];
-    }
+// `wholeDocument` is for a Gemini chat, one pretty-printed JSON document; the other tools write one JSON value per line.
+export function findImages(text: string, wholeDocument = false): Image[] {
+  let roots: unknown[];
+  try {
+    roots = wholeDocument ? [JSON.parse(text)] : parseJsonLines(text.split('\n'));
+  } catch {
+    return []; // a chat that is being rewritten right now
   }
   const found: Image[] = [];
   const seen = new Set<string>();
@@ -69,7 +69,8 @@ export function findImages(text: string): Image[] {
       }
       continue;
     }
-    stack.push(...Object.values(value).reverse());
+    const children = Object.values(value);
+    for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]); // not a spread: a huge array would overflow it
   }
   return found;
 }
@@ -90,11 +91,12 @@ export function recapInput(s: Session, max = MAX_INPUT): string {
 export function parseRecap(reply: string): Recap | null {
   const recap: Recap = { done: [], fixed: [] };
   for (const line of reply.split('\n')) {
-    const m = /^\s*[-*]?\s*(DONE|FIXED):\s*(.+)$/i.exec(line);
+    // Models dress the lines up as list items or in bold ("1. **DONE:** x"), and fill an empty list with "none".
+    const m = /^[\s\d.)*-]*(DONE|FIXED)\W*?:\W*(.+)$/i.exec(line.replaceAll('**', ''));
     if (!m) continue;
     const list = m[1].toUpperCase() === 'DONE' ? recap.done : recap.fixed;
     const item = oneLine(m[2], 200);
-    if (item !== '' && list.length < MAX_ITEMS) list.push(item);
+    if (item !== '' && !NOTHING.test(item) && list.length < MAX_ITEMS) list.push(item);
   }
   return recap.done.length + recap.fixed.length === 0 ? null : recap;
 }
@@ -176,13 +178,15 @@ async function askRecap(r: Row, s: Session, o: RecapOptions): Promise<Recap | nu
 }
 
 // Writes the row's recap page and returns its path. Pages older than 7 days go first, so screenshots don't pile up.
+// shortcut: the file is held as text and parsed twice (once here, once by readSessionFile), so a session of a few hundred MB
+// peaks near 3× its size, and one over ~512 MB fails (V8's string limit); stream it in one pass if such sessions show up.
 export async function writeRecap(r: Row, o: RecapOptions): Promise<string> {
   if (r.file === undefined) throw new Error('this session has no history file to recap');
   const text = (await readText(r.file)) ?? '';
   const s = (await readSessionFile(r.tool, r.file, r.cwd)) ?? { tool: r.tool, id: r.sessionId, cwd: r.cwd, title: r.title, events: [], lastActivityAt: r.at };
 
   // In order until the page would pass MAX_IMAGE_BYTES; the rest are only counted.
-  const all = findImages(text);
+  const all = findImages(text, r.tool === 'gemini');
   let bytes = 0;
   const images = all.filter((image) => (bytes += image.data.length) <= MAX_IMAGE_BYTES);
   const hiddenImages = all.length - images.length;
@@ -199,7 +203,8 @@ export async function writeRecap(r: Row, o: RecapOptions): Promise<string> {
       // gone already, or not ours to remove
     }
   }
-  const page = path.join(dir, `${r.tool}-${r.sessionId.replace(/[/\\]/g, '_')}.html`);
+  // The id comes from session content and the path is handed to `open` (cmd.exe on Windows): plain characters only.
+  const page = path.join(dir, `${r.tool}-${r.sessionId.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120)}.html`);
   fs.writeFileSync(page, html, { mode: 0o600 });
   fs.chmodSync(page, 0o600); // writeFileSync's mode only applies to a new file
   return page;
