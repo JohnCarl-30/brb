@@ -1,7 +1,7 @@
 import { basename, join } from 'node:path';
 import { oneLine } from '../text';
 import type { Session, SessionEvent } from '../types';
-import { OUTPUT_KEEP_CHARS, TITLE_MAX, isBackgroundCwd, parseJsonLines, readHeadTail, recentFiles, str } from './files';
+import { OUTPUT_KEEP_CHARS, TITLE_MAX, isBackgroundCwd, parseJsonLines, readHeadTail, readText, recentFiles, str } from './files';
 import type { RecentFile } from './files';
 
 const INTERRUPT_PREFIX = '[Request interrupted by user';
@@ -124,8 +124,11 @@ function titleOf(t: Transcript): string {
   return 'untitled session';
 }
 
-async function readSession(file: RecentFile): Promise<Session | null> {
-  const { lines, tailStart } = await readHeadTail(file.path);
+// `whole` reads every line, for a recap; the list reads only the head and tail.
+export async function readSession(file: RecentFile, whole = false): Promise<Session | null> {
+  const { lines, tailStart } = whole
+    ? { lines: ((await readText(file.path)) ?? '').split('\n'), tailStart: null }
+    : await readHeadTail(file.path);
   const t: Transcript = { events: [], toolUses: new Map(), answered: new Set(), humanPromptInTail: false };
   // The head and the tail are parsed apart, so every parsed line still knows which side of the skipped middle it was on.
   const headLines = tailStart === null ? lines : lines.slice(0, tailStart);
@@ -143,6 +146,7 @@ async function readSession(file: RecentFile): Promise<Session | null> {
     title: titleOf(t),
     events: t.events,
     lastActivityAt: t.events.at(-1)?.at ?? file.mtimeMs,
+    file: file.path,
   };
   if (t.branch !== undefined && t.branch !== 'HEAD') session.branch = t.branch;
   // Without a human prompt in the tail, the last turn began in the part that was skipped.
@@ -153,6 +157,6 @@ async function readSession(file: RecentFile): Promise<Session | null> {
 // `root` is the Claude folder (~/.claude). `o.now` is unused here: every adapter takes the same options.
 export async function readClaudeSessions(root: string, o: { now: number; sinceMs: number }): Promise<Session[]> {
   const files = await recentFiles(join(root, 'projects'), /\.jsonl$/, o.sinceMs, 2);
-  const sessions = await Promise.all(files.map(readSession));
+  const sessions = await Promise.all(files.map((file) => readSession(file)));
   return sessions.filter((s): s is Session => s !== null);
 }

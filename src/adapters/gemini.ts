@@ -76,7 +76,7 @@ function addMessage(events: SessionEvent[], message: any, cwd: string): void {
 }
 
 // A chat is read whole, since it is one JSON document, so the session never has a partial last turn.
-async function readSession(file: RecentFile, cwd: string): Promise<Session | null> {
+export async function readSession(file: RecentFile, cwd: string): Promise<Session | null> {
   const text = await readText(file.path);
   if (text === null) return null; // removed since it was listed
   let chat: any;
@@ -99,6 +99,7 @@ async function readSession(file: RecentFile, cwd: string): Promise<Session | nul
     title: oneLine(firstPrompt?.kind === 'user' ? firstPrompt.text : '', TITLE_MAX) || 'untitled session',
     events,
     lastActivityAt: events.at(-1)?.at ?? file.mtimeMs,
+    file: file.path,
   };
 }
 

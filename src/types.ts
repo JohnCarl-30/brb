@@ -16,7 +16,8 @@ export interface Session {
   branch?: string;
   events: SessionEvent[];  // chronological
   lastActivityAt: number;  // last event's `at`, or the file mtime when there are no events
-  partialTurn?: boolean;   // the reader skipped part of the last turn, so its edits, commands or answers may be unseen
+  partialTurn?: boolean;
+  file?: string;           // the history file it was read from   // the reader skipped part of the last turn, so its edits, commands or answers may be unseen
 }
 export interface PermissionRequest { at: number; message: string }
 export interface Verdict { status: Status; detail: string; longText: string }

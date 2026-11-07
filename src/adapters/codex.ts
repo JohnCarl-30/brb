@@ -124,7 +124,7 @@ function titleOf(t: Transcript, threadName: string | undefined): string {
 }
 
 // A rollout is read whole, since Codex's are small, so the session never has a partial last turn.
-async function readSession(file: RecentFile, titles: Map<string, string>): Promise<Session | null> {
+export async function readSession(file: RecentFile, titles: Map<string, string>): Promise<Session | null> {
   const text = await readText(file.path);
   if (text === null) return null; // removed since it was listed
   const lines = parseJsonLines(text.split('\n'));
@@ -143,6 +143,7 @@ async function readSession(file: RecentFile, titles: Map<string, string>): Promi
     title: titleOf(t, titles.get(id)),
     events: t.events,
     lastActivityAt: t.events.at(-1)?.at ?? file.mtimeMs,
+    file: file.path,
   };
 }
 

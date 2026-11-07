@@ -125,5 +125,5 @@ export function renderBrief(c: CatchUp): string {
   return lines.join('\n');
 }
 
-// longText is the source for an AI one-liner, not something to hand to other programs.
-export const renderJson = (c: CatchUp): string => JSON.stringify(c, (key, value) => (key === 'longText' ? undefined : value), 2);
+// longText is the source for an AI one-liner and file is where a recap reads from, not things to hand to other programs.
+export const renderJson = (c: CatchUp): string => JSON.stringify(c, (key, value) => (key === 'longText' || key === 'file' ? undefined : value), 2);

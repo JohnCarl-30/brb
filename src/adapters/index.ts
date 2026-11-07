@@ -1,10 +1,10 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { Session } from '../types';
-import { readClaudeSessions } from './claude';
-import { readCodexSessions } from './codex';
+import type { Session, Tool } from '../types';
+import { readClaudeSessions, readSession as readClaude } from './claude';
+import { readCodexSessions, readSession as readCodex } from './codex';
 import { SCAN_MS } from './files';
-import { readGeminiSessions } from './gemini';
+import { readGeminiSessions, readSession as readGemini } from './gemini';
 
 export interface Roots { claude: string; codex: string; gemini: string; brb: string }
 
@@ -38,4 +38,13 @@ export async function loadAllSessions(roots: Roots, now: number): Promise<{ sess
     }
   });
   return { sessions, warnings };
+}
+
+// One session's file read whole, whatever its size, for its recap. `cwd` is where it ran (a Gemini chat doesn't say).
+// The mtime only matters for a session with no events, which a recap never shows.
+export function readSessionFile(tool: Tool, file: string, cwd: string): Promise<Session | null> {
+  const recent = { path: file, mtimeMs: 0 };
+  if (tool === 'claude') return readClaude(recent, true);
+  if (tool === 'codex') return readCodex(recent, new Map());
+  return readGemini(recent, cwd);
 }

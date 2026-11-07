@@ -11,6 +11,7 @@ export interface Row {
   files: string[];   // files this session edited, relative to its cwd (else absolute with ~), ≤ 5
   resume: string;    // exact command to jump back in
   longText: string;  // source text for an AI one-liner; never printed
+  file?: string;     // the session's history file, for its recap page; never printed
 }
 export interface NextStep { label: string; command: string }
 export interface CatchUp {
@@ -96,7 +97,7 @@ export function buildCatchUp(input: CatchUpInput): CatchUp {
       return [{
         tool: s.tool, sessionId: s.id, title: s.title, status: verdict.status, detail: verdict.detail,
         at: s.lastActivityAt, project, cwd: s.cwd, branch: s.branch,
-        files: editedFiles(s, home), resume: resumeFor(s), longText: verdict.longText,
+        files: editedFiles(s, home), resume: resumeFor(s), longText: verdict.longText, file: s.file,
       }];
     })
     .sort(byStatus);
