@@ -20,7 +20,9 @@ const QUOTES = /^["'`“”‘’]+|["'`“”‘’]+$/g;
 // Each tool answers one non-interactive question. --no-session-persistence and --ephemeral keep brb's own run out of the user's Claude and Codex history.
 // The text can hold injected instructions (a failed command's output), so nothing may act on it: no tools, no MCP servers, or read-only.
 // Claude's --tools takes a list, so --strict-mcp-config must follow it or the prompt would be read as a tool name.
-export function commandFor(tool: Tool, prompt: string): { bin: string; args: string[] } {
+// Null for Kiro: it has no headless mode known to run with tools off, so its sessions get no AI summary.
+export function commandFor(tool: Tool, prompt: string): { bin: string; args: string[] } | null {
+  if (tool === 'kiro') return null;
   if (tool === 'claude') return { bin: 'claude', args: ['-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--strict-mcp-config', prompt] };
   if (tool === 'codex') return { bin: 'codex', args: ['exec', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', prompt] };
   return { bin: 'gemini', args: ['-p', prompt, '--approval-mode', 'plan'] };
@@ -72,7 +74,10 @@ export async function summarizeRows(
   for (const r of jobs) {
     const hit = cache[summaryKey(r)];
     if (hit !== undefined) result.set(summaryKey(r), hit);
-    else if (o.which(commandFor(r.tool, '').bin)) todo.push(r);
+    else {
+      const command = commandFor(r.tool, '');
+      if (command && o.which(command.bin)) todo.push(r);
+    }
   }
   if (todo.length === 0) return result;
 
@@ -82,7 +87,7 @@ export async function summarizeRows(
   const env = { ...o.env, BRB_INTERNAL: '1' };
   await Promise.all(todo.map(async (r) => {
     try {
-      const { bin, args } = commandFor(r.tool, PROMPT + r.longText.slice(0, MAX_TEXT));
+      const { bin, args } = commandFor(r.tool, PROMPT + r.longText.slice(0, MAX_TEXT))!; // only tools with a command reach todo
       const { code, stdout } = await o.runner(bin, args, { cwd, env, timeoutMs: TIMEOUT_MS });
       const line = code === 0 ? reply(stdout) : '';
       if (line !== '') fresh[summaryKey(r)] = line;

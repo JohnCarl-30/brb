@@ -30,7 +30,7 @@ Usage: brb [options]
   -v, --version    print the version
   -h, --help       show this help
 
-brb reads your local Claude Code, Codex and Gemini CLI history. No API key.
+brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key.
 `;
 
 // `runner`, `which` and `tmpDir` let tests stand in for the AI tools and keep off the real tmp folder; `stdin` is for `brb hook`.

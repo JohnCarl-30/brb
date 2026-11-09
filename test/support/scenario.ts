@@ -57,7 +57,7 @@ export function seedScenario(dir: string, now: number): { home: string; repo: st
   write(repo, 'package.json', PACKAGE('16.0.0'));
   for (const file of ['src/cart.ts', 'src/routes/auth.ts']) fs.utimesSync(path.join(repo, file), new Date(min(47)), new Date(min(47)));
 
-  const h: FakeHome = { home, claude: path.join(home, '.claude'), codex: path.join(home, '.codex'), gemini: path.join(home, '.gemini'), brb: path.join(home, '.brb') };
+  const h: FakeHome = { home, claude: path.join(home, '.claude'), codex: path.join(home, '.codex'), gemini: path.join(home, '.gemini'), kiro: path.join(home, '.kiro'), brb: path.join(home, '.brb') };
 
   writeClaudeSession(h, {
     id: IDS.wait, cwd: repo, branch: 'main',

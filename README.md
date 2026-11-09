@@ -74,7 +74,7 @@ Every session row has a number. In a terminal, brb asks which one you want right
 
 Type the number and press Enter. Enter on its own, `q` or Ctrl-C leaves without resuming anything. If you already know the number, skip the question with `brb 3`.
 
-brb prints the command, then runs it. A session from another project gets a `cd` into its folder first, so you land in the right place with the right CLI: `claude --resume`, `codex resume` or `gemini --resume`. When you quit that CLI you're back in your shell, and brb exits with the CLI's exit code.
+brb prints the command, then runs it. A session from another project gets a `cd` into its folder first, so you land in the right place with the right CLI: `claude --resume`, `codex resume` or `gemini --resume`. Kiro is an IDE, so for a Kiro session brb runs `kiro .`, which opens the project; pick the chat from Kiro's session list. When you quit that CLI you're back in your shell, and brb exits with the CLI's exit code.
 
 - With npx, the number goes at the end: `npx @john_carl/brb 3`.
 - Outside a terminal, piped or in a script, brb doesn't ask, and `brb 3` only prints the command.
@@ -104,9 +104,10 @@ Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus C
 | Claude Code | `~/.claude/projects` | Questions, plans and permission prompts (permission prompts need the plugin) |
 | Codex CLI | `~/.codex/sessions` | Questions |
 | Gemini CLI | `~/.gemini/tmp` | Questions |
+| Kiro | `~/.kiro/sessions` | Questions and permission prompts |
 | Cursor | Coming in v1.1 | |
 
-If you moved a tool's folder, brb follows the same variable the tool does: `CLAUDE_CONFIG_DIR` for Claude Code and `CODEX_HOME` for Codex. Gemini CLI has no such variable, so brb always reads `~/.gemini`.
+If you moved a tool's folder, brb follows the same variable the tool does: `CLAUDE_CONFIG_DIR` for Claude Code and `CODEX_HOME` for Codex. Gemini CLI and Kiro have no such variable, so brb always reads `~/.gemini` and `~/.kiro`.
 
 brb leaves out sessions that background agents run by themselves: its own summary runs, and the observer sessions of the [claude-mem](https://github.com/thedotmack/claude-mem) plugin.
 
@@ -151,7 +152,7 @@ Run `npx @john_carl/brb --brief` before starting a task.
 
 In a terminal, brb prints the facts first. Then it asks for one-line summaries of finished and stopped sessions and redraws the screen with them. You never wait on AI to see the list, and Ctrl-C skips the summaries.
 
-- Each session is summarized by the tool it came from, and only if that tool is installed: Claude Code runs `claude -p` with Haiku and no tools, Codex runs `codex exec` in a read-only sandbox, and Gemini runs `gemini -p` in plan mode. None of them can change files.
+- Each session is summarized by the tool it came from, and only if that tool is installed: Claude Code runs `claude -p` with Haiku and no tools, Codex runs `codex exec` in a read-only sandbox, and Gemini runs `gemini -p` in plan mode. None of them can change files. Kiro sessions get no summary: brb knows no way to run Kiro headless with its tools off.
 - These runs use your existing login for that CLI, so they count toward that tool's usage like any other prompt. brb holds no key.
 - brb summarizes at most 8 sessions per run and gives each 20 seconds. Summaries are cached in `~/.brb/cache/summaries.json`, so a session that hasn't moved is never summarized twice.
 - The summary runs stay out of your history and out of brb's list. They run in a private `brb-summaries` folder in your temp folder, which brb skips.
@@ -190,7 +191,7 @@ Usage: brb [options]
   -v, --version    print the version
   -h, --help       show this help
 
-brb reads your local Claude Code, Codex and Gemini CLI history. No API key.
+brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key.
 ```
 
 ### Environment variables

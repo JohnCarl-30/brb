@@ -57,7 +57,7 @@ test('session-start hook says "1 other session" and leaves out the waiting count
   const home = path.join(tmp, 'one');
   const cwd = path.join(home, 'proj');
   fs.mkdirSync(cwd, { recursive: true });
-  const h = { home, claude: path.join(home, '.claude'), codex: path.join(home, '.codex'), gemini: path.join(home, '.gemini'), brb: path.join(home, '.brb') };
+  const h = { home, claude: path.join(home, '.claude'), codex: path.join(home, '.codex'), gemini: path.join(home, '.gemini'), kiro: path.join(home, '.kiro'), brb: path.join(home, '.brb') };
   writeClaudeSession(h, { id: 'old-one', cwd, lines: [cl.user('add a test', NOW - 30 * 60_000), cl.say('Added a test.', NOW - 29 * 60_000)] });
 
   const { stdout } = await hook('session-start', JSON.stringify({ session_id: 'new-session', cwd }), home);

@@ -29,7 +29,7 @@ export interface CatchUpInput {
   excludeSessionId?: string; sinceMs?: number; warnings: string[];
 }
 
-export const TOOL_NAME: Record<Tool, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' };
+export const TOOL_NAME: Record<Tool, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', kiro: 'Kiro' };
 
 const FIRST_RUN_MS = 8 * 60 * 60_000;
 const MAX_FILES = 5;
@@ -43,6 +43,7 @@ const RESUME: Record<Tool, (id: string) => string> = {
   claude: (id) => `claude --resume ${quote(id)}`,
   codex: (id) => `codex resume ${quote(id)}`,
   gemini: (id) => `gemini --resume ${quote(id)}`,
+  kiro: () => 'kiro .', // Kiro is an IDE: this opens the project, not the chat itself
 };
 
 const inside = (dir: string, p: string): boolean => p.startsWith(dir + path.sep);
