@@ -47,7 +47,7 @@ test('says nothing moved without a time away on a first run', () => {
 
 test('says when there are no sessions at all', () => {
   const c = { ...scenarioCatchUp(), sessions: 0, here: null, elsewhere: [], next: [] };
-  expect(renderTerminal(c, plain)).toBe(' brb found no AI sessions from the last 7 days.\n Supported: Claude Code, Codex CLI, Gemini CLI.\n');
+  expect(renderTerminal(c, plain)).toBe(' brb found no AI sessions from the last 7 days.\n Supported: Claude Code, Codex CLI, Gemini CLI, Kiro.\n');
 });
 
 // Real buildCatchUp output: the only session's last activity is your own message, so nothing moved after it.
@@ -73,7 +73,7 @@ test('says nothing moved under --since when sessions exist but are older', () =>
 
 test('says there are no sessions when buildCatchUp is given none', () => {
   expect(renderTerminal(buildCatchUp(quiet({ sessions: [] })), plain)).toBe(
-    ' brb found no AI sessions from the last 7 days.\n Supported: Claude Code, Codex CLI, Gemini CLI.\n',
+    ' brb found no AI sessions from the last 7 days.\n Supported: Claude Code, Codex CLI, Gemini CLI, Kiro.\n',
   );
 });
 

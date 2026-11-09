@@ -1,4 +1,4 @@
-export type Tool = 'claude' | 'codex' | 'gemini';
+export type Tool = 'claude' | 'codex' | 'gemini' | 'kiro';
 export type Status = 'waiting' | 'finished' | 'failed' | 'working' | 'idle';
 export type SessionEvent =
   | { kind: 'user'; at: number; text: string }                  // a prompt the human typed

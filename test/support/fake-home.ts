@@ -4,12 +4,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-export interface FakeHome { home: string; claude: string; codex: string; gemini: string; brb: string }
+export interface FakeHome { home: string; claude: string; codex: string; gemini: string; kiro: string; brb: string }
 
 export function makeFakeHome(): FakeHome {
   // realpath, because the tmp folder is a symlink on macOS (/var -> /private/var) and brb works with real paths.
   const home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'brb-home-'));
-  return { home, claude: path.join(home, '.claude'), codex: path.join(home, '.codex'), gemini: path.join(home, '.gemini'), brb: path.join(home, '.brb') };
+  return { home, claude: path.join(home, '.claude'), codex: path.join(home, '.codex'), gemini: path.join(home, '.gemini'), kiro: path.join(home, '.kiro'), brb: path.join(home, '.brb') };
 }
 
 export const iso = (ms: number) => new Date(ms).toISOString();
@@ -153,6 +153,57 @@ export function writeGeminiSession(h: FakeHome, o: { id: string; projectRoot: st
   const chat = { sessionId: o.id, projectHash: 'test', startTime, lastUpdated: iso(newest ?? mtime ?? 0), kind: 'main', messages: o.messages };
   const file = path.join(dir, 'chats', `session-${startTime.slice(0, 16).replace(':', '-')}-${o.id.slice(0, 8)}.json`);
   fs.writeFileSync(file, JSON.stringify(chat, null, 2));
+  if (mtime !== undefined) fs.utimesSync(file, new Date(mtime), new Date(mtime));
+  return file;
+}
+
+// ---- Kiro: <kiro>/sessions/<workspace hash>/<session id>/{session.json, messages.jsonl}
+// Each line of messages.jsonl is { id, timestamp, payload: { type, ... } }; a tool's call and its result share a toolCallId.
+// The shapes were count-checked on 2026-11-09 against the owner's sessions (field names and labels only, no content read).
+
+const kline = (at: number, payload: object) => ({ id: `k${at}-${Math.random().toString(16).slice(2, 6)}`, timestamp: iso(at), payload });
+
+export const kr = {
+  user: (text: string, at: number) => kline(at, { type: 'user', content: text, source: 'chat' }),
+  say: (text: string, at: number) => kline(at, { type: 'assistant', content: text, operationType: 'Say', executionId: 'e1' }),
+  think: (text: string, at: number) => kline(at, { type: 'assistant', content: text, operationType: 'Reasoning', executionId: 'e1' }),
+  call: (id: string, toolName: string, kind: string, args: object, at: number, filePath?: string) =>
+    kline(at, { type: 'tool_call', toolCallId: id, toolName, kind, args, status: 'completed', executionId: 'e1', ...(filePath ? { filePath } : {}) }),
+  result: (id: string, content: string, success: boolean, at: number) => kline(at, { type: 'tool_result', toolCallId: id, content, success, executionId: 'e1' }),
+  ask: (id: string, question: string, at: number) => kline(at, {
+    type: 'pending_interaction', interactionType: 'tool_approval', toolCallId: id, question, executionId: 'e1',
+    options: [{ optionId: 'allow-once', name: 'Allow', kind: 'allow_once' }, { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' }],
+  }),
+  answered: (id: string, at: number) => kline(at, { type: 'interaction_resolved', toolCallId: id, outcome: 'selected', selectedOption: 'allow-once', executionId: 'e1' }),
+  end: (at: number, stopReason = 'end_turn') => kline(at, { type: 'turn_end', stopReason, executionId: 'e1' }),
+};
+
+// `cwd` goes in session.json's workspacePaths ([] for a session outside any workspace). `filler` pads the file with about
+// that many bytes after the first line, to push a session past the read window. The mtime of messages.jsonl is `mtimeMs`,
+// or else the newest timestamp. Returns the path of messages.jsonl.
+export function writeKiroSession(
+  h: FakeHome,
+  o: { id: string; cwd: string | null; title?: string; lines: object[]; mtimeMs?: number; filler?: number },
+): string {
+  const dir = path.join(h.kiro, 'sessions', o.cwd === null ? '_global' : 'a1b2c3d4e5f60718', o.id);
+  fs.mkdirSync(dir, { recursive: true });
+  const times = o.lines.map(timestampOf).filter((t): t is number => t !== undefined && !Number.isNaN(t));
+  const stamp = iso(times[0] ?? 0);
+  fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({
+    schemaVersion: '1', dataModelVersion: 3, id: o.id, title: o.title ?? 'New Session', agentMode: 'vibe',
+    workspacePaths: o.cwd === null ? [] : [o.cwd], createdAt: stamp, lastModifiedAt: stamp, modelId: 'auto', autopilot: true,
+  }));
+  const lines = [...o.lines];
+  const pad: object[] = [];
+  for (let bytes = 0; bytes < (o.filler ?? 0); ) {
+    const line = kr.think(PAD_TEXT, times[0] ?? 0);
+    pad.push(line);
+    bytes += JSON.stringify(line).length + 1;
+  }
+  lines.splice(1, 0, ...pad);
+  const file = path.join(dir, 'messages.jsonl');
+  fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const mtime = o.mtimeMs ?? (times.length > 0 ? Math.max(...times) : undefined);
   if (mtime !== undefined) fs.utimesSync(file, new Date(mtime), new Date(mtime));
   return file;
 }

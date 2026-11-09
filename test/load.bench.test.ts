@@ -16,7 +16,7 @@ test('loads 100 projects of long history in under a second', async () => {
       cl.user('fix the login bug', min(60)), cl.say('Fixed it.', min(50))] });
   }
   const started = performance.now();
-  const { sessions, warnings } = await loadAllSessions({ claude: h.claude, codex: h.codex, gemini: h.gemini, brb: h.brb }, NOW);
+  const { sessions, warnings } = await loadAllSessions({ claude: h.claude, codex: h.codex, gemini: h.gemini, kiro: h.kiro, brb: h.brb }, NOW);
   const elapsed = performance.now() - started;
   console.log(`loadAllSessions: ${elapsed.toFixed(0)} ms for ${sessions.length} sessions`);
   expect(sessions).toHaveLength(100);

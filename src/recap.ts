@@ -164,9 +164,10 @@ async function askRecap(r: Row, s: Session, o: RecapOptions): Promise<Recap | nu
   const cache = readCache(file);
   const cached = cache[summaryKey(r)];
   if (cached !== undefined) return parseRecap(cached);
-  const { bin, args } = commandFor(r.tool, RECAP_PROMPT + recapInput(s));
+  const command = commandFor(r.tool, RECAP_PROMPT + recapInput(s));
   const cwd = path.join(o.tmpDir ?? os.tmpdir(), 'brb-summaries');
-  if (!o.which(bin) || !privateFolder(cwd)) return null;
+  if (!command || !o.which(command.bin) || !privateFolder(cwd)) return null;
+  const { bin, args } = command;
   try {
     const { code, stdout } = await o.runner(bin, args, { cwd, env: { ...o.env, BRB_INTERNAL: '1' }, timeoutMs: TIMEOUT_MS, signal: o.signal });
     const recap = code === 0 ? parseRecap(stdout) : null;

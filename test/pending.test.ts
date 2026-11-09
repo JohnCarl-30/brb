@@ -62,7 +62,7 @@ test('writes nothing for a session id that holds a path', () => {
 
 test('a fresh permission request turns a session into waiting', async () => {
   const world = seedScenario(path.join(tmp, 'demo'), NOW);
-  const h = { home: world.home, claude: path.join(world.home, '.claude'), codex: path.join(world.home, '.codex'), gemini: path.join(world.home, '.gemini'), brb: path.join(world.home, '.brb') };
+  const h = { home: world.home, claude: path.join(world.home, '.claude'), codex: path.join(world.home, '.codex'), gemini: path.join(world.home, '.gemini'), kiro: path.join(world.home, '.kiro'), brb: path.join(world.home, '.brb') };
   writeClaudeSession(h, {
     id: 'clean-build', cwd: world.repo, branch: 'main',
     lines: [cl.user('clean the build', min(4)), cl.tool('t9', 'Bash', { command: 'rm -rf build' }, min(3))],

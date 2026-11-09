@@ -568,6 +568,100 @@ async function readGeminiSessions(root, o) {
   return sessions.flat();
 }
 
+// src/adapters/kiro.ts
+import { dirname, isAbsolute as isAbsolute2, join as join5, resolve as resolve3 } from "path";
+var COMMAND_TOOLS = /* @__PURE__ */ new Set(["execute_bash", "runCommand", "executeBash"]);
+var EDIT_KINDS = /* @__PURE__ */ new Set(["edit", "delete", "move"]);
+var INTERRUPTED = /* @__PURE__ */ new Set(["cancelled", "aborted"]);
+var isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+function filesOf(call, cwd) {
+  const a = call.args;
+  const named = [call.filePath, a.path, a.file, a.targetFile, a.sourcePath, a.destinationPath].map(str).filter((f) => f !== void 0);
+  return [...new Set(named.map((f) => resolve3(cwd, f)))].filter(isAbsolute2);
+}
+function addResult(t, p, at) {
+  const call = t.calls.get(p.toolCallId);
+  if (call === void 0) return;
+  const command = str(call.args.command);
+  if (COMMAND_TOOLS.has(call.toolName ?? "") && command?.trim()) {
+    const output = typeof p.content === "string" ? p.content : "";
+    t.events.push({ kind: "command", at, command, ok: p.success === true, output: output.slice(-OUTPUT_KEEP_CHARS) });
+  } else if (EDIT_KINDS.has(call.kind ?? "") && p.success === true) {
+    const files = filesOf(call, t.cwd);
+    if (files.length > 0) t.events.push({ kind: "edit", at, files });
+  }
+}
+function addLine3(t, line, inTail) {
+  const p = line.payload;
+  const at = typeof line.timestamp === "string" ? Date.parse(line.timestamp) : NaN;
+  if (!isRecord2(p) || Number.isNaN(at)) return;
+  const text = typeof p.content === "string" ? p.content : "";
+  switch (p.type) {
+    case "user":
+      if (text.trim() !== "") t.events.push({ kind: "user", at, text });
+      if (inTail) t.humanPromptInTail = true;
+      break;
+    case "assistant":
+      if (p.operationType === "Say" && text.trim() !== "") t.events.push({ kind: "agent", at, text });
+      break;
+    case "tool_call":
+      if (typeof p.toolCallId === "string") {
+        t.calls.set(p.toolCallId, { toolName: str(p.toolName), kind: str(p.kind), args: isRecord2(p.args) ? p.args : {}, filePath: str(p.filePath) });
+      }
+      break;
+    case "tool_result":
+      addResult(t, p, at);
+      break;
+    case "pending_interaction":
+      if (typeof p.toolCallId === "string") t.pending.set(p.toolCallId, { at, text: oneLine(str(p.question) ?? "needs your approval", ERROR_MAX) });
+      break;
+    case "interaction_resolved":
+      t.pending.delete(p.toolCallId);
+      break;
+    case "turn_end":
+      t.pending.clear();
+      if (p.stopReason === "end_turn") t.events.push({ kind: "turn-end", at });
+      else t.events.push({ kind: "error", at, text: INTERRUPTED.has(p.stopReason) ? "interrupted" : "Kiro stopped with an error" });
+      break;
+  }
+}
+async function readSession4(file, whole = false) {
+  const meta = await readText(join5(dirname(file.path), "session.json"));
+  let info;
+  try {
+    info = JSON.parse(meta ?? "");
+  } catch {
+    return null;
+  }
+  const cwd = str(info?.workspacePaths?.[0]) ?? str(info?.rootPaths?.[0]);
+  const id = str(info?.id);
+  if (cwd === void 0 || id === void 0 || isBackgroundCwd(cwd)) return null;
+  const { lines, tailStart } = whole ? { lines: (await readText(file.path) ?? "").split("\n"), tailStart: null } : await readHeadTail(file.path);
+  const t = { cwd, events: [], calls: /* @__PURE__ */ new Map(), pending: /* @__PURE__ */ new Map(), humanPromptInTail: false };
+  const headLines = tailStart === null ? lines : lines.slice(0, tailStart);
+  for (const line of parseJsonLines(headLines)) addLine3(t, line, false);
+  if (tailStart !== null) for (const line of parseJsonLines(lines.slice(tailStart))) addLine3(t, line, true);
+  for (const { at, text } of t.pending.values()) t.events.push({ kind: "ask", at, reason: "question", text });
+  t.events.sort((a, b) => a.at - b.at);
+  const firstPrompt = t.events.find((e) => e.kind === "user");
+  const session = {
+    tool: "kiro",
+    id,
+    cwd,
+    title: oneLine(str(info.title) ?? (firstPrompt?.kind === "user" ? firstPrompt.text : ""), TITLE_MAX) || "untitled session",
+    events: t.events,
+    lastActivityAt: t.events.at(-1)?.at ?? file.mtimeMs,
+    file: file.path
+  };
+  if (tailStart !== null && !t.humanPromptInTail) session.partialTurn = true;
+  return session;
+}
+async function readKiroSessions(root, o) {
+  const files = await recentFiles(join5(root, "sessions"), /^messages\.jsonl$/, o.sinceMs, 3);
+  const sessions = await Promise.all(files.map((file) => readSession4(file)));
+  return sessions.filter((s) => s !== null);
+}
+
 // src/adapters/index.ts
 function resolveRoots(env) {
   const home = env.HOME ?? os.homedir();
@@ -576,13 +670,15 @@ function resolveRoots(env) {
     codex: env.CODEX_HOME ?? path.join(home, ".codex"),
     gemini: path.join(home, ".gemini"),
     // Gemini CLI has no env override
+    kiro: path.join(home, ".kiro"),
     brb: env.BRB_HOME ?? path.join(home, ".brb")
   };
 }
 var TOOLS = [
   { label: "Claude Code", read: readClaudeSessions, root: (r) => r.claude },
   { label: "Codex", read: readCodexSessions, root: (r) => r.codex },
-  { label: "Gemini CLI", read: readGeminiSessions, root: (r) => r.gemini }
+  { label: "Gemini CLI", read: readGeminiSessions, root: (r) => r.gemini },
+  { label: "Kiro", read: readKiroSessions, root: (r) => r.kiro }
 ];
 async function loadAllSessions(roots, now) {
   const results = await Promise.allSettled(TOOLS.map((t) => t.read(t.root(roots), { now, sinceMs: now - SCAN_MS })));
@@ -602,6 +698,7 @@ function readSessionFile(tool, file, cwd) {
   const recent = { path: file, mtimeMs: 0 };
   if (tool === "claude") return readSession(recent, true);
   if (tool === "codex") return readSession2(recent, /* @__PURE__ */ new Map());
+  if (tool === "kiro") return readSession4(recent, true);
   return readSession3(recent, cwd);
 }
 
@@ -721,7 +818,7 @@ function projectFor(cwd) {
 }
 
 // src/catchup.ts
-var TOOL_NAME = { claude: "Claude", codex: "Codex", gemini: "Gemini" };
+var TOOL_NAME = { claude: "Claude", codex: "Codex", gemini: "Gemini", kiro: "Kiro" };
 var FIRST_RUN_MS = 8 * 60 * 6e4;
 var MAX_FILES = 5;
 var MAX_NEXT = 3;
@@ -731,7 +828,9 @@ var quotePath = (p) => p.startsWith("~/") ? `~/${quote(p.slice(2))}` : quote(p);
 var RESUME = {
   claude: (id) => `claude --resume ${quote(id)}`,
   codex: (id) => `codex resume ${quote(id)}`,
-  gemini: (id) => `gemini --resume ${quote(id)}`
+  gemini: (id) => `gemini --resume ${quote(id)}`,
+  kiro: () => "kiro ."
+  // Kiro is an IDE: this opens the project, not the chat itself
 };
 var inside = (dir, p) => p.startsWith(dir + path3.sep);
 var tilde = (p, home) => p === home || inside(home, p) ? `~${p.slice(home.length)}` : p;
@@ -1014,7 +1113,7 @@ function renderTerminal(c, o) {
   };
   const sections = [];
   if (c.sessions === 0) {
-    sections.push([" brb found no AI sessions from the last 7 days.", " Supported: Claude Code, Codex CLI, Gemini CLI."]);
+    sections.push([" brb found no AI sessions from the last 7 days.", " Supported: Claude Code, Codex CLI, Gemini CLI, Kiro."]);
   } else {
     const away = c.awayMs === null ? "" : ` \xB7 away ${formatAge(c.awayMs)}`;
     const moved = rows === 0 ? "nothing moved" : `${plural(rows, "thing", "things")} moved`;
@@ -1128,6 +1227,7 @@ var TIMEOUT_MS = 2e4;
 var SUMMARY_WIDTH = 60;
 var QUOTES = /^["'`“”‘’]+|["'`“”‘’]+$/g;
 function commandFor(tool, prompt) {
+  if (tool === "kiro") return null;
   if (tool === "claude") return { bin: "claude", args: ["-p", "--model", "haiku", "--no-session-persistence", "--tools", "", "--strict-mcp-config", prompt] };
   if (tool === "codex") return { bin: "codex", args: ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", prompt] };
   return { bin: "gemini", args: ["-p", prompt, "--approval-mode", "plan"] };
@@ -1166,7 +1266,10 @@ async function summarizeRows(rows, o) {
   for (const r of jobs) {
     const hit = cache2[summaryKey(r)];
     if (hit !== void 0) result.set(summaryKey(r), hit);
-    else if (o.which(commandFor(r.tool, "").bin)) todo.push(r);
+    else {
+      const command = commandFor(r.tool, "");
+      if (command && o.which(command.bin)) todo.push(r);
+    }
   }
   if (todo.length === 0) return result;
   const cwd = path7.join(o.tmpDir ?? os3.tmpdir(), "brb-summaries");
@@ -1193,9 +1296,9 @@ function writeCache(file, cache2, fresh) {
   } catch {
   }
 }
-var defaultRunner = (bin, args, o) => new Promise((resolve5) => {
+var defaultRunner = (bin, args, o) => new Promise((resolve6) => {
   const child = execFile(bin, args, { cwd: o.cwd, env: o.env, timeout: o.timeoutMs, maxBuffer: 1024 * 1024, signal: o.signal }, (err, stdout) => {
-    resolve5({ code: err === null ? 0 : typeof err.code === "number" ? err.code : 1, stdout });
+    resolve6({ code: err === null ? 0 : typeof err.code === "number" ? err.code : 1, stdout });
   });
   child.stdin?.on("error", () => {
   });
@@ -1333,9 +1436,10 @@ async function askRecap(r, s, o) {
   const cache2 = readCache(file);
   const cached = cache2[summaryKey(r)];
   if (cached !== void 0) return parseRecap(cached);
-  const { bin, args } = commandFor(r.tool, RECAP_PROMPT + recapInput(s));
+  const command = commandFor(r.tool, RECAP_PROMPT + recapInput(s));
   const cwd = path8.join(o.tmpDir ?? os4.tmpdir(), "brb-summaries");
-  if (!o.which(bin) || !privateFolder(cwd)) return null;
+  if (!command || !o.which(command.bin) || !privateFolder(cwd)) return null;
+  const { bin, args } = command;
   try {
     const { code, stdout } = await o.runner(bin, args, { cwd, env: { ...o.env, BRB_INTERNAL: "1" }, timeoutMs: TIMEOUT_MS2, signal: o.signal });
     const recap = code === 0 ? parseRecap(stdout) : null;
@@ -1387,7 +1491,7 @@ Usage: brb [options]
   -v, --version    print the version
   -h, --help       show this help
 
-brb reads your local Claude Code, Codex and Gemini CLI history. No API key.
+brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key.
 `;
 var fail = (message) => ({ stdout: `brb: ${message}
 Run brb --help for usage.
