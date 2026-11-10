@@ -44,7 +44,7 @@ const sum = (rows: Row[], runner: Runner, which: (bin: string) => boolean = () =
 describe('commandFor', () => {
   // R42: a failed row's text includes command output, which can carry injected instructions, so nothing may act on it.
   test('asks each tool for one non-interactive answer, with tools off or read-only', () => {
-    expect(commandFor('claude', 'p')).toEqual({ bin: 'claude', args: ['-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--strict-mcp-config', 'p'] });
+    expect(commandFor('claude', 'p')).toEqual({ bin: 'claude', args: ['-p', '--model', 'haiku', '--no-session-persistence', '--setting-sources', '', '--tools', '', '--strict-mcp-config', 'p'] });
     expect(commandFor('codex', 'p')).toEqual({ bin: 'codex', args: ['exec', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', 'p'] });
     expect(commandFor('gemini', 'p')).toEqual({ bin: 'gemini', args: ['-p', 'p', '--approval-mode', 'plan'] });
     expect(commandFor('kiro', 'p')).toBeNull(); // no headless mode known to run with tools off
