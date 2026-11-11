@@ -146,7 +146,7 @@ function firstSentence(text, max = 70) {
 }
 function lastQuestion(text, max = 70) {
   const question = sentences(text).filter((sentence) => sentence.endsWith("?")).at(-1);
-  return question === void 0 ? null : oneLine(question, max);
+  return question === void 0 ? null : oneLine(question.split("\n").at(-1).replace(LEADING_MARKERS, ""), max);
 }
 function errorLine(output, max = 70) {
   const lines = output.split("\n").map(clean).filter(Boolean).reverse();
@@ -1228,7 +1228,7 @@ var SUMMARY_WIDTH = 60;
 var QUOTES = /^["'`“”‘’]+|["'`“”‘’]+$/g;
 function commandFor(tool, prompt) {
   if (tool === "kiro") return null;
-  if (tool === "claude") return { bin: "claude", args: ["-p", "--model", "haiku", "--no-session-persistence", "--tools", "", "--strict-mcp-config", prompt] };
+  if (tool === "claude") return { bin: "claude", args: ["-p", "--model", "haiku", "--no-session-persistence", "--setting-sources", "", "--tools", "", "--strict-mcp-config", prompt] };
   if (tool === "codex") return { bin: "codex", args: ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", prompt] };
   return { bin: "gemini", args: ["-p", prompt, "--approval-mode", "plan"] };
 }
