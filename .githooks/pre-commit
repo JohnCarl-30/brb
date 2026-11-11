@@ -1,0 +1,4 @@
+#!/bin/sh
+# dist/brb.mjs is committed because the plugin runs it straight from the repo, so every commit rebuilds it.
+# It bundles the working tree, not only what is staged; CI's "dist is up to date" step catches a mismatch.
+npm run --silent build >/dev/null && git add dist/brb.mjs
