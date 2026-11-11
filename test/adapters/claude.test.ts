@@ -619,3 +619,16 @@ test('reads the lines that sit exactly on the edges of the head and tail windows
   ]);
   expect(s.partialTurn).toBe(true); // the last prompt is the head's, not the tail's
 });
+
+test('a tool call with no result yet is the pending tool, until something follows it', async () => {
+  const h = fakeHome();
+  const start = [cl.user('run the suite', min(20)), cl.say('Running the suite.', min(6), 'tool_use'), cl.tool('b1', 'Bash', { command: 'npm test' }, min(5))];
+  writeClaudeSession(h, { id: 'c1', cwd: '/w/app', lines: start });
+  writeClaudeSession(h, { id: 'c2', cwd: '/w/app', lines: [...start, cl.result('b1', 'Tests: 6 passed', min(1))] });
+  writeClaudeSession(h, { id: 'c3', cwd: '/w/app', lines: [cl.user('look around', min(20)), cl.tool('r1', 'Read', { file_path: '/w/app/a.ts' }, min(5))] });
+  const byId = Object.fromEntries((await read(h)).map((s) => [s.id, s]));
+  expect(byId.c1.pendingTool).toEqual({ at: min(5), label: 'npm test' });
+  expect(classify(byId.c1, NOW)).toMatchObject({ status: 'working', detail: 'npm test · no result for 5 min' });
+  expect(byId.c2.pendingTool).toBeUndefined();
+  expect(byId.c3.pendingTool).toEqual({ at: min(5), label: 'Read' });
+});

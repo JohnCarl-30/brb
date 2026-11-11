@@ -59,8 +59,8 @@ Sessions in the project you are standing in come first. Other projects follow, o
 | `◐` | waiting on you | The session asked a question, has a plan for you to approve, is blocked on a permission prompt, or ended its turn by asking you something without doing any work. A waiting session stays on the list however old it is. |
 | `●` | finished | The session ended its turn, and its last command, if it ran one, passed. |
 | `✕` | stopped | The last thing in the turn was an error or an interruption, or the last command failed, such as a test run or a build. |
-| `◌` | working | The turn hasn't ended and the session wrote something in the last minute. |
-| `○` | idle | The turn hasn't ended but nothing has happened for a minute or more, such as a session you closed mid-answer. |
+| `◌` | working | The turn hasn't ended and the session wrote something in the last minute, or a Claude tool call (a long test run, say) has had no result for under 10 minutes. Without the plugin's hooks that can also be a permission prompt. |
+| `○` | idle | The turn hasn't ended but nothing has happened for a minute or more and no tool call is still out, such as a session you closed mid-answer. |
 | `✎` | You | Files changed in your working tree that no AI session's edit tools touched, plus any `TODO` or `FIXME` you added in them. |
 
 ## Picking a session back up

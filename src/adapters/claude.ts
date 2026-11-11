@@ -18,7 +18,7 @@ interface ToolUse { name: string; input: any; at: number; inTail: boolean }
 interface Transcript {
   events: SessionEvent[];
   toolUses: Map<string, ToolUse>;
-  answered: Set<string>; // ids of AskUserQuestion / ExitPlanMode calls that got a result
+  answered: Set<string>; // ids of tool calls that got a result
   sessionId?: string;
   cwd?: string;
   branch?: string;
@@ -39,6 +39,7 @@ function addToolResult(t: Transcript, block: any, at: number): void {
   const id = block.tool_use_id;
   const tool = typeof id === 'string' ? t.toolUses.get(id) : undefined;
   if (!tool) return; // its call sits in the part of the file that was skipped
+  t.answered.add(id);
   const failed = block.is_error === true;
   if (tool.name === 'Bash') {
     const command = str(tool.input?.command);
@@ -46,8 +47,6 @@ function addToolResult(t: Transcript, block: any, at: number): void {
   } else if (EDIT_TOOLS.has(tool.name)) {
     const file = str(tool.input?.file_path) ?? str(tool.input?.notebook_path);
     if (file && !failed) t.events.push({ kind: 'edit', at, files: [file] });
-  } else if (ASK_TOOLS.has(tool.name)) {
-    t.answered.add(id);
   }
 }
 
@@ -114,6 +113,15 @@ function addUnansweredAsks(t: Transcript, skippedMiddle: boolean): void {
   }
 }
 
+// The newest tool call (asks aside) that has no result and nothing after it. A call from before a skipped middle
+// may have been answered in the skipped bytes, so only one from the tail counts then.
+function pendingTool(t: Transcript, skippedMiddle: boolean): Session['pendingTool'] {
+  const [id, tool] = [...t.toolUses].at(-1) ?? [];
+  if (!id || !tool || t.answered.has(id) || ASK_TOOLS.has(tool.name) || (skippedMiddle && !tool.inTail)) return undefined;
+  if ((t.events.at(-1)?.at ?? -Infinity) > tool.at) return undefined;
+  return { at: tool.at, label: (tool.name === 'Bash' && oneLine(str(tool.input?.command) ?? '', 40)) || tool.name };
+}
+
 // The first of the custom title, the agent name, Claude's own ai-title and the first prompt that says anything.
 function titleOf(t: Transcript): string {
   const firstPrompt = t.events.find((e) => e.kind === 'user');
@@ -149,6 +157,8 @@ export async function readSession(file: RecentFile, whole = false): Promise<Sess
     file: file.path,
   };
   if (t.branch !== undefined && t.branch !== 'HEAD') session.branch = t.branch;
+  const pending = pendingTool(t, tailStart !== null);
+  if (pending) session.pendingTool = pending;
   // Without a human prompt in the tail, the last turn began in the part that was skipped.
   if (tailStart !== null && !t.humanPromptInTail) session.partialTurn = true;
   return session;
