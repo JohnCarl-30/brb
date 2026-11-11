@@ -20,10 +20,11 @@ const QUOTES = /^["'`“”‘’]+|["'`“”‘’]+$/g;
 // Each tool answers one non-interactive question. --no-session-persistence and --ephemeral keep brb's own run out of the user's Claude and Codex history.
 // The text can hold injected instructions (a failed command's output), so nothing may act on it: no tools, no MCP servers, or read-only.
 // Claude's --tools takes a list, so --strict-mcp-config must follow it or the prompt would be read as a tool name.
+// --setting-sources '' skips the user's plugins and hooks: they cost ~2s per call and their injected context leaked into replies.
 // Null for Kiro: it has no headless mode known to run with tools off, so its sessions get no AI summary.
 export function commandFor(tool: Tool, prompt: string): { bin: string; args: string[] } | null {
   if (tool === 'kiro') return null;
-  if (tool === 'claude') return { bin: 'claude', args: ['-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--strict-mcp-config', prompt] };
+  if (tool === 'claude') return { bin: 'claude', args: ['-p', '--model', 'haiku', '--no-session-persistence', '--setting-sources', '', '--tools', '', '--strict-mcp-config', prompt] };
   if (tool === 'codex') return { bin: 'codex', args: ['exec', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', prompt] };
   return { bin: 'gemini', args: ['-p', prompt, '--approval-mode', 'plan'] };
 }

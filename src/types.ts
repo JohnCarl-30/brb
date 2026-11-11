@@ -16,6 +16,7 @@ export interface Session {
   branch?: string;
   events: SessionEvent[];  // chronological
   lastActivityAt: number;  // last event's `at`, or the file mtime when there are no events
+  pendingTool?: { at: number; label: string }; // the last thing was a tool call with no result yet: still running, or blocked on a permission prompt
   partialTurn?: boolean;   // the reader skipped part of the last turn, so its edits, commands or answers may be unseen
   file?: string;           // the history file it was read from
 }

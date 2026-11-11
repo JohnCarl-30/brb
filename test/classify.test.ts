@@ -174,3 +174,9 @@ test('a partly read turn still waits on a structured ask', () => {
   const events = [user(min(10)), ask(min(9), 'question', 'Which one?')];
   expect(classify({ ...s(events), partialTurn: true }, NOW)).toEqual({ status: 'waiting', detail: 'asks: "Which one?"', longText: '' });
 });
+
+test('a tool call with no result yet is working past the quiet minute, then idle after 10 minutes', () => {
+  const pending = (at: number): Session => ({ ...s([user(min(20)), agent(at, 'Running the suite.')]), pendingTool: { at, label: 'npm test' } });
+  expect(classify(pending(min(5)), NOW)).toEqual({ status: 'working', detail: 'npm test · no result for 5 min', longText: 'Running the suite.' });
+  expect(classify(pending(min(10)), NOW)).toMatchObject({ status: 'idle', detail: 'no activity for 10 min' });
+});

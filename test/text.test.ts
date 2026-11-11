@@ -124,6 +124,12 @@ test('lastQuestion finds the last sentence ending in a question mark', () => {
   expect(lastQuestion('Round per item or on the total? I will wait.')).toBe('Round per item or on the total?');
 });
 
+test('lastQuestion starts at the line the question is on, not at the last period', () => {
+  // A pasted brb catch-up has no periods, so without this the "question" began at "Welcome back".
+  const pasted = 'Welcome back · away 3 min · 28 things moved\n\nEVERYWHERE\n 1 ◐ Claude langfuse\n\n- Which one do you want first?';
+  expect(lastQuestion(pasted)).toBe('Which one do you want first?');
+});
+
 test('lastQuestion is null when nothing asks', () => {
   expect(lastQuestion('All done.')).toBeNull();
   expect(lastQuestion('')).toBeNull();

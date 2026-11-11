@@ -48,7 +48,8 @@ export function firstSentence(text: string, max = 70): string {
 
 export function lastQuestion(text: string, max = 70): string | null {
   const question = sentences(text).filter((sentence) => sentence.endsWith('?')).at(-1);
-  return question === undefined ? null : oneLine(question, max);
+  // A question never spans lines; without this, text with no periods (a pasted list) would run into it.
+  return question === undefined ? null : oneLine(question.split('\n').at(-1)!.replace(LEADING_MARKERS, ''), max);
 }
 
 export function errorLine(output: string, max = 70): string {
