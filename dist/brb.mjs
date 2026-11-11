@@ -182,13 +182,13 @@ async function mtimeOf(file) {
 async function recentFiles(dir, name, sinceMs, maxDepth) {
   async function walk(folder, depth) {
     const found = await Promise.all((await listFolder(folder)).map(async (entry) => {
-      const path9 = join(folder, entry.name);
+      const path10 = join(folder, entry.name);
       if (entry.isDirectory()) {
-        return entry.name !== "subagents" && depth < maxDepth ? walk(path9, depth + 1) : [];
+        return entry.name !== "subagents" && depth < maxDepth ? walk(path10, depth + 1) : [];
       }
       if (!entry.isFile() || !name.test(entry.name)) return [];
-      const mtimeMs = await mtimeOf(path9);
-      return mtimeMs !== null && mtimeMs > sinceMs ? [{ path: path9, mtimeMs }] : [];
+      const mtimeMs = await mtimeOf(path10);
+      return mtimeMs !== null && mtimeMs > sinceMs ? [{ path: path10, mtimeMs }] : [];
     }));
     return found.flat();
   }
@@ -205,10 +205,10 @@ async function readRange(handle, position, length) {
   return buffer.toString("utf8", 0, filled);
 }
 var toLines = (text) => text.split("\n").filter((line) => line !== "");
-async function readHeadTail(path9) {
+async function readHeadTail(path10) {
   let handle;
   try {
-    handle = await open(path9, "r");
+    handle = await open(path10, "r");
   } catch (error) {
     if (isMissing(error)) return { lines: [], tailStart: null };
     throw error;
@@ -225,9 +225,9 @@ async function readHeadTail(path9) {
     await handle.close();
   }
 }
-async function readText(path9) {
+async function readText(path10) {
   try {
-    return await readFile(path9, "utf8");
+    return await readFile(path10, "utf8");
   } catch (error) {
     if (isMissing(error)) return null;
     throw error;
@@ -711,10 +711,10 @@ function readSessionFile(tool, file, cwd) {
 
 // src/compute.ts
 import * as os2 from "os";
-import * as path6 from "path";
+import * as path7 from "path";
 
 // src/catchup.ts
-import * as path3 from "path";
+import * as path4 from "path";
 
 // src/time.ts
 var MINUTE = 6e4;
@@ -827,6 +827,27 @@ function projectFor(cwd) {
   return project;
 }
 
+// src/seen.ts
+import * as fs2 from "fs";
+import * as path3 from "path";
+var seenKey = (tool, id) => `${tool}-${id}`;
+var fileIn = (brbHome) => path3.join(brbHome, "seen.json");
+function readSeen(brbHome) {
+  try {
+    const data = JSON.parse(fs2.readFileSync(fileIn(brbHome), "utf8"));
+    return new Map(Object.entries(data).filter((e) => typeof e[1] === "number"));
+  } catch {
+    return /* @__PURE__ */ new Map();
+  }
+}
+function markSeen(brbHome, key, now) {
+  const seen = readSeen(brbHome);
+  seen.set(key, now);
+  for (const [k, at] of seen) if (now - at > SCAN_MS) seen.delete(k);
+  fs2.mkdirSync(brbHome, { recursive: true, mode: 448 });
+  fs2.writeFileSync(fileIn(brbHome), JSON.stringify(Object.fromEntries(seen)), { mode: 384 });
+}
+
 // src/catchup.ts
 var TOOL_NAME = { claude: "Claude", codex: "Codex", gemini: "Gemini", kiro: "Kiro" };
 var FIRST_RUN_MS = 8 * 60 * 6e4;
@@ -842,7 +863,7 @@ var RESUME = {
   kiro: () => "kiro ."
   // Kiro is an IDE: this opens the project, not the chat itself
 };
-var inside = (dir, p) => p.startsWith(dir + path3.sep);
+var inside = (dir, p) => p.startsWith(dir + path4.sep);
 var tilde = (p, home) => p === home || inside(home, p) ? `~${p.slice(home.length)}` : p;
 function editedFiles(s, home) {
   const newestFirst = [...s.events].reverse().flatMap((e) => e.kind === "edit" ? e.files : []);
@@ -875,7 +896,8 @@ function buildCatchUp(input) {
   const rows = sessions.flatMap((s) => {
     const project = projectFor(s.cwd);
     const verdict = classify(s, now, input.permissions.get(s.id));
-    if (verdict.status !== "waiting" && s.lastActivityAt <= windowStart(project.key)) return [];
+    const pickedAt = input.sinceMs === void 0 ? input.seen?.get(seenKey(s.tool, s.id)) ?? -Infinity : -Infinity;
+    if (verdict.status !== "waiting" && s.lastActivityAt <= Math.max(windowStart(project.key), pickedAt)) return [];
     return [{
       tool: s.tool,
       sessionId: s.id,
@@ -908,8 +930,8 @@ function buildCatchUp(input) {
 
 // src/git.ts
 import { execFileSync } from "child_process";
-import * as fs2 from "fs";
-import * as path4 from "path";
+import * as fs3 from "fs";
+import * as path5 from "path";
 var MAX_SCAN_BYTES = 1e6;
 var MAX_GIT_OUTPUT = 64 * 1024 * 1024;
 var TODO = /\b(?:TODO|FIXME)\b[:\s-]*(.*)$/;
@@ -924,7 +946,7 @@ function git(cwd, args) {
 var headExists = (root) => git(root, ["rev-parse", "--verify", "--quiet", "HEAD"]) !== null;
 function countLines(file) {
   try {
-    const text = fs2.readFileSync(file, "utf8");
+    const text = fs3.readFileSync(file, "utf8");
     if (text.includes("\0")) return 0;
     return text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
   } catch {
@@ -961,10 +983,10 @@ function readGit(cwd) {
   }
   const changes = [];
   for (const { file, untracked } of files) {
-    const abs = path4.join(root, file);
+    const abs = path5.join(root, file);
     let stat2;
     try {
-      stat2 = fs2.statSync(abs);
+      stat2 = fs3.statSync(abs);
     } catch {
       continue;
     }
@@ -981,9 +1003,9 @@ var todosIn = (file, line, text) => {
 };
 function scanWhole(root, file) {
   try {
-    const abs = path4.join(root, file);
-    if (fs2.statSync(abs).size > MAX_SCAN_BYTES) return [];
-    const text = fs2.readFileSync(abs, "utf8");
+    const abs = path5.join(root, file);
+    if (fs3.statSync(abs).size > MAX_SCAN_BYTES) return [];
+    const text = fs3.readFileSync(abs, "utf8");
     if (text.includes("\0")) return [];
     return text.split("\n").flatMap((line, i) => todosIn(file, i + 1, line));
   } catch {
@@ -1023,23 +1045,23 @@ function addedTodos(root, files) {
 }
 
 // src/pending.ts
-import * as fs3 from "fs";
-import * as path5 from "path";
+import * as fs4 from "fs";
+import * as path6 from "path";
 var MARKER = /^claude-([\w-]+)\.json$/;
 function recordPermissionRequest(brbHome, sessionId, message, now) {
   if (!/^[\w-]+$/.test(sessionId)) return;
-  const dir = path5.join(brbHome, "pending");
-  fs3.mkdirSync(dir, { recursive: true, mode: 448 });
-  const file = path5.join(dir, `claude-${sessionId}.json`);
-  fs3.writeFileSync(file, JSON.stringify({ at: now, message }), { mode: 384 });
-  fs3.chmodSync(file, 384);
+  const dir = path6.join(brbHome, "pending");
+  fs4.mkdirSync(dir, { recursive: true, mode: 448 });
+  const file = path6.join(dir, `claude-${sessionId}.json`);
+  fs4.writeFileSync(file, JSON.stringify({ at: now, message }), { mode: 384 });
+  fs4.chmodSync(file, 384);
 }
 function readPermissionRequests(brbHome, now) {
-  const dir = path5.join(brbHome, "pending");
+  const dir = path6.join(brbHome, "pending");
   const found = /* @__PURE__ */ new Map();
   let names;
   try {
-    names = fs3.readdirSync(dir);
+    names = fs4.readdirSync(dir);
   } catch {
     return found;
   }
@@ -1047,10 +1069,10 @@ function readPermissionRequests(brbHome, now) {
     const id = MARKER.exec(name)?.[1];
     if (id === void 0) continue;
     try {
-      const marker = JSON.parse(fs3.readFileSync(path5.join(dir, name), "utf8"));
+      const marker = JSON.parse(fs4.readFileSync(path6.join(dir, name), "utf8"));
       const { at, message } = marker;
       if (typeof at !== "number" || typeof message !== "string") continue;
-      if (now - at > SCAN_MS) fs3.rmSync(path5.join(dir, name), { force: true });
+      if (now - at > SCAN_MS) fs4.rmSync(path6.join(dir, name), { force: true });
       else found.set(id, { at, message });
     } catch {
     }
@@ -1066,7 +1088,7 @@ async function computeCatchUp(o) {
   let git2 = null;
   if (snapshot) {
     const agent = agentEditedFiles(sessions, projectFor(o.cwd).key);
-    const yours = snapshot.changes.filter((c) => !agent.has(realpath(path6.resolve(snapshot.root, c.file))));
+    const yours = snapshot.changes.filter((c) => !agent.has(realpath(path7.resolve(snapshot.root, c.file))));
     git2 = { root: snapshot.root, branch: snapshot.branch, yours, todos: addedTodos(snapshot.root, yours.map((c) => c.file)) };
   }
   return buildCatchUp({
@@ -1075,6 +1097,7 @@ async function computeCatchUp(o) {
     home: o.env.HOME ?? os2.homedir(),
     sessions,
     permissions: readPermissionRequests(roots.brb, o.now),
+    seen: readSeen(roots.brb),
     git: git2,
     excludeSessionId: o.excludeSessionId,
     sinceMs: o.sinceMs,
@@ -1230,15 +1253,15 @@ async function runHook(name, stdin, o) {
 }
 
 // src/recap.ts
-import * as fs5 from "fs";
+import * as fs6 from "fs";
 import * as os4 from "os";
-import * as path8 from "path";
+import * as path9 from "path";
 
 // src/summarize.ts
 import { execFile } from "child_process";
-import * as fs4 from "fs";
+import * as fs5 from "fs";
 import * as os3 from "os";
-import * as path7 from "path";
+import * as path8 from "path";
 var PROMPT = "Summarize this AI coding session update for its developer in 8 words or fewer. Reply with only the summary.\n\n";
 var MAX_JOBS = 8;
 var MAX_TEXT = 2e3;
@@ -1255,7 +1278,7 @@ function commandFor(tool, prompt) {
 var summaryKey = (r) => `${r.tool}:${r.sessionId}:${r.at}`;
 function readCache(file) {
   try {
-    const data = JSON.parse(fs4.readFileSync(file, "utf8"));
+    const data = JSON.parse(fs5.readFileSync(file, "utf8"));
     if (typeof data !== "object" || data === null || Array.isArray(data)) return {};
     return Object.fromEntries(Object.entries(data).filter((e) => typeof e[1] === "string"));
   } catch {
@@ -1268,9 +1291,9 @@ function reply(stdout) {
 }
 function privateFolder(dir) {
   try {
-    fs4.mkdirSync(dir, { recursive: true, mode: 448 });
+    fs5.mkdirSync(dir, { recursive: true, mode: 448 });
     if (process.platform === "win32") return true;
-    const st = fs4.lstatSync(dir);
+    const st = fs5.lstatSync(dir);
     return st.isDirectory() && st.uid === process.getuid() && (st.mode & 63) === 0;
   } catch {
     return false;
@@ -1278,7 +1301,7 @@ function privateFolder(dir) {
 }
 async function summarizeRows(rows, o) {
   const jobs = rows.filter((r) => r.status === "finished" || r.status === "failed").slice(0, MAX_JOBS);
-  const file = path7.join(o.brbHome, "cache", "summaries.json");
+  const file = path8.join(o.brbHome, "cache", "summaries.json");
   const cache2 = readCache(file);
   const result = /* @__PURE__ */ new Map();
   const fresh = {};
@@ -1292,7 +1315,7 @@ async function summarizeRows(rows, o) {
     }
   }
   if (todo.length === 0) return result;
-  const cwd = path7.join(o.tmpDir ?? os3.tmpdir(), "brb-summaries");
+  const cwd = path8.join(o.tmpDir ?? os3.tmpdir(), "brb-summaries");
   if (!privateFolder(cwd)) return result;
   const env = { ...o.env, BRB_INTERNAL: "1" };
   await Promise.all(todo.map(async (r) => {
@@ -1311,8 +1334,8 @@ async function summarizeRows(rows, o) {
 function writeCache(file, cache2, fresh) {
   if (Object.keys(fresh).length === 0) return;
   try {
-    fs4.mkdirSync(path7.dirname(file), { recursive: true, mode: 448 });
-    fs4.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries({ ...cache2, ...fresh }).slice(-MAX_CACHED))), { mode: 384 });
+    fs5.mkdirSync(path8.dirname(file), { recursive: true, mode: 448 });
+    fs5.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries({ ...cache2, ...fresh }).slice(-MAX_CACHED))), { mode: 384 });
   } catch {
   }
 }
@@ -1326,13 +1349,13 @@ var defaultRunner = (bin, args, o) => new Promise((resolve6) => {
 });
 function onPath(bin, env) {
   const names = process.platform === "win32" ? [bin, `${bin}.cmd`, `${bin}.exe`] : [bin];
-  for (const dir of (env.PATH ?? "").split(path7.delimiter)) {
+  for (const dir of (env.PATH ?? "").split(path8.delimiter)) {
     if (dir === "") continue;
     for (const name of names) {
       try {
-        const file = path7.join(dir, name);
-        if (!fs4.statSync(file).isFile()) continue;
-        fs4.accessSync(file, fs4.constants.X_OK);
+        const file = path8.join(dir, name);
+        if (!fs5.statSync(file).isFile()) continue;
+        fs5.accessSync(file, fs5.constants.X_OK);
         return true;
       } catch {
       }
@@ -1452,12 +1475,12 @@ ${sections}${shots}
 }
 async function askRecap(r, s, o) {
   if (!o.ai) return null;
-  const file = path8.join(o.brbHome, "cache", "recaps.json");
+  const file = path9.join(o.brbHome, "cache", "recaps.json");
   const cache2 = readCache(file);
   const cached = cache2[summaryKey(r)];
   if (cached !== void 0) return parseRecap(cached);
   const command = commandFor(r.tool, RECAP_PROMPT + recapInput(s));
-  const cwd = path8.join(o.tmpDir ?? os4.tmpdir(), "brb-summaries");
+  const cwd = path9.join(o.tmpDir ?? os4.tmpdir(), "brb-summaries");
   if (!command || !o.which(command.bin) || !privateFolder(cwd)) return null;
   const { bin, args } = command;
   try {
@@ -1479,18 +1502,18 @@ async function writeRecap(r, o) {
   const hiddenImages = all.length - images.length;
   const recap = await askRecap(r, s, o);
   const html = renderRecapHtml(r, o.now, { recap, messages: recap ? [] : lastMessages(s), images, hiddenImages });
-  const dir = path8.join(o.brbHome, "recaps");
-  fs5.mkdirSync(dir, { recursive: true, mode: 448 });
-  for (const name of fs5.readdirSync(dir)) {
-    const page2 = path8.join(dir, name);
+  const dir = path9.join(o.brbHome, "recaps");
+  fs6.mkdirSync(dir, { recursive: true, mode: 448 });
+  for (const name of fs6.readdirSync(dir)) {
+    const page2 = path9.join(dir, name);
     try {
-      if (name.endsWith(".html") && fs5.statSync(page2).mtimeMs < o.now - KEEP_MS) fs5.rmSync(page2);
+      if (name.endsWith(".html") && fs6.statSync(page2).mtimeMs < o.now - KEEP_MS) fs6.rmSync(page2);
     } catch {
     }
   }
-  const page = path8.join(dir, `${r.tool}-${r.sessionId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}.html`);
-  fs5.writeFileSync(page, html, { mode: 384 });
-  fs5.chmodSync(page, 384);
+  const page = path9.join(dir, `${r.tool}-${r.sessionId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}.html`);
+  fs6.writeFileSync(page, html, { mode: 384 });
+  fs6.chmodSync(page, 384);
   return page;
 }
 
@@ -1569,12 +1592,19 @@ async function run(o) {
     runner: o.runner ?? defaultRunner,
     which: o.which ?? ((bin) => onPath(bin, o.env))
   });
+  const seen = (n) => {
+    const row = listed[n - 1];
+    try {
+      if (row) markSeen(resolveRoots(o.env).brb, seenKey(row.tool, row.sessionId), o.now);
+    } catch {
+    }
+  };
   if (pick !== void 0) {
     const row = listed[Number(pick) - 1];
     if (!row) return fail(listed.length === 0 ? "no sessions to pick up" : `no session ${pick}: pick 1 to ${listed.length}`);
-    if (show) return { stdout: "", exitCode: 0, recap, show: Number(pick) };
+    if (show) return { stdout: "", exitCode: 0, recap, show: Number(pick), seen };
     return { stdout: `\u2192 ${commandText(row.resume)}
-`, exitCode: 0, exec: o.isTTY ? row.resume : void 0 };
+`, exitCode: 0, exec: o.isTTY ? row.resume : void 0, seen, picked: Number(pick) };
   }
   if (values.json) return { stdout: renderJson(c) + "\n", exitCode: 0 };
   if (values.brief) {
@@ -1585,7 +1615,7 @@ async function run(o) {
   const view = { color, columns: o.columns ?? 100, all: values.all ?? false, numbered: values.exclude === void 0 };
   const stdout = renderTerminal(c, view);
   const choices = o.isTTY && view.numbered && listed.length > 0 ? listed.map((r) => r.resume) : void 0;
-  const picks = choices ? { choices, recap } : {};
+  const picks = choices ? { choices, recap, seen } : {};
   if (!o.isTTY || noAi) return { stdout, exitCode: 0, ...picks };
   const rerender = async () => {
     const rows = [...c.here?.rows ?? [], ...view.all ? c.elsewhere : []];
@@ -1690,17 +1720,22 @@ async function main() {
       process.off("SIGINT", skip);
       process.stdout.write(redraw(result.stdout, next, process.stdout.rows ?? 0, process.stdout.columns));
     }
-    if (result.show !== void 0 && !await showRecap(result.recap, result.show)) process.exitCode = 1;
+    if (result.show !== void 0) {
+      if (await showRecap(result.recap, result.show)) result.seen?.(result.show);
+      else process.exitCode = 1;
+    }
+    if (result.picked !== void 0) result.seen?.(result.picked);
     let command = result.exec;
     while (result.choices && process.stdin.isTTY) {
       const pick = await askPick(result.choices.length);
       if (pick === "quit") break;
       if (pick === "again") continue;
       if (typeof pick === "object") {
-        await showRecap(result.recap, pick.show);
+        if (await showRecap(result.recap, pick.show)) result.seen?.(pick.show);
         continue;
       }
       command = result.choices[pick - 1];
+      result.seen?.(pick);
       process.stdout.write(` \u2192 ${commandText(command)}
 `);
       break;

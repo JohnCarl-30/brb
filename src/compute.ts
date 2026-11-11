@@ -5,6 +5,7 @@ import { agentEditedFiles, buildCatchUp, type CatchUp } from './catchup';
 import { addedTodos, readGit } from './git';
 import { readPermissionRequests } from './pending';
 import { projectFor, realpath } from './projects';
+import { readSeen } from './seen';
 
 export async function computeCatchUp(o: { env: NodeJS.ProcessEnv; cwd: string; now: number; excludeSessionId?: string; sinceMs?: number; skipGit?: boolean }): Promise<CatchUp> {
   const roots = resolveRoots(o.env);
@@ -20,7 +21,7 @@ export async function computeCatchUp(o: { env: NodeJS.ProcessEnv; cwd: string; n
   }
 
   return buildCatchUp({
-    now: o.now, cwd: o.cwd, home: o.env.HOME ?? os.homedir(), sessions, permissions: readPermissionRequests(roots.brb, o.now), git,
+    now: o.now, cwd: o.cwd, home: o.env.HOME ?? os.homedir(), sessions, permissions: readPermissionRequests(roots.brb, o.now), seen: readSeen(roots.brb), git,
     excludeSessionId: o.excludeSessionId, sinceMs: o.sinceMs, warnings,
   });
 }

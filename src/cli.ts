@@ -9,6 +9,7 @@ import { computeCatchUp } from './compute';
 import { runHook } from './hooks';
 import { realpath } from './projects';
 import { writeRecap } from './recap';
+import { markSeen, seenKey } from './seen';
 import { renderBrief, renderCount, renderJson, renderTerminal, shownElsewhere } from './render';
 import { defaultRunner, onPath, summarizeRows, summaryKey, type Runner } from './summarize';
 import { commandText } from './text';
@@ -39,10 +40,11 @@ export interface RunOptions { argv: string[]; env: NodeJS.ProcessEnv; cwd: strin
 // `pending` is the one line to show while `rerender` works; it is only there when `rerender` is. `exec` is a shell
 // command to hand the terminal to once stdout is written. `choices` are the numbered rows' resume commands, in order,
 // for the "pick a session" question asked at the end in a terminal. `recap` writes listed row n's recap page and gives its
-// path; `show` is the row whose recap to open right away (brb show <n>).
+// path; `show` is the row whose recap to open right away (brb show <n>). `seen` records that you picked listed row n, so
+// later lists leave it out until it moves again; `picked` is the row `brb <n>` named.
 export interface RunResult {
   stdout: string; exitCode: number; rerender?: () => Promise<string | null>; pending?: string; exec?: string; choices?: string[];
-  recap?: (n: number, signal?: AbortSignal) => Promise<string>; show?: number;
+  recap?: (n: number, signal?: AbortSignal) => Promise<string>; show?: number; seen?: (n: number) => void; picked?: number;
 }
 
 const fail = (message: string): RunResult => ({ stdout: `brb: ${message}\nRun brb --help for usage.\n`, exitCode: 1 });
@@ -91,12 +93,20 @@ export async function run(o: RunOptions): Promise<RunResult> {
     brbHome: resolveRoots(o.env).brb, now: o.now, env: o.env, ai: o.isTTY && !noAi, signal, tmpDir: o.tmpDir,
     runner: o.runner ?? defaultRunner, which: o.which ?? ((bin) => onPath(bin, o.env)),
   });
+  const seen = (n: number): void => {
+    const row = listed[n - 1];
+    try {
+      if (row) markSeen(resolveRoots(o.env).brb, seenKey(row.tool, row.sessionId), o.now);
+    } catch {
+      // a home that can't be written must not stop the resume; the row just stays listed
+    }
+  };
   if (pick !== undefined) {
     const row = listed[Number(pick) - 1];
     if (!row) return fail(listed.length === 0 ? 'no sessions to pick up' : `no session ${pick}: pick 1 to ${listed.length}`);
-    if (show) return { stdout: '', exitCode: 0, recap, show: Number(pick) };
+    if (show) return { stdout: '', exitCode: 0, recap, show: Number(pick), seen };
     // Without a terminal there is nothing to hand over, so only print the command.
-    return { stdout: `→ ${commandText(row.resume)}\n`, exitCode: 0, exec: o.isTTY ? row.resume : undefined };
+    return { stdout: `→ ${commandText(row.resume)}\n`, exitCode: 0, exec: o.isTTY ? row.resume : undefined, seen, picked: Number(pick) };
   }
   if (values.json) return { stdout: renderJson(c) + '\n', exitCode: 0 };
   if (values.brief) {
@@ -107,7 +117,7 @@ export async function run(o: RunOptions): Promise<RunResult> {
   const view = { color, columns: o.columns ?? 100, all: values.all ?? false, numbered: values.exclude === undefined };
   const stdout = renderTerminal(c, view);
   const choices = o.isTTY && view.numbered && listed.length > 0 ? listed.map((r) => r.resume) : undefined;
-  const picks = choices ? { choices, recap } : {};
+  const picks = choices ? { choices, recap, seen } : {};
   if (!o.isTTY || noAi) return { stdout, exitCode: 0, ...picks };
 
   // The facts above print first; the caller asks for this afterwards, so AI never delays them.
@@ -219,17 +229,22 @@ async function main(): Promise<void> {
       process.off('SIGINT', skip);
       process.stdout.write(redraw(result.stdout, next, process.stdout.rows ?? 0, process.stdout.columns));
     }
-    if (result.show !== undefined && !(await showRecap(result.recap!, result.show))) process.exitCode = 1;
+    if (result.show !== undefined) {
+      if (await showRecap(result.recap!, result.show)) result.seen?.(result.show);
+      else process.exitCode = 1;
+    }
+    if (result.picked !== undefined) result.seen?.(result.picked);
     let command = result.exec;
     while (result.choices && process.stdin.isTTY) {
       const pick = await askPick(result.choices.length);
       if (pick === 'quit') break;
       if (pick === 'again') continue;
       if (typeof pick === 'object') {
-        await showRecap(result.recap!, pick.show);
+        if (await showRecap(result.recap!, pick.show)) result.seen?.(pick.show);
         continue;
       }
       command = result.choices[pick - 1];
+      result.seen?.(pick);
       process.stdout.write(` → ${commandText(command)}\n`);
       break;
     }

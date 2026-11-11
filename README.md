@@ -265,6 +265,7 @@ brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key
 - It decides a session's status from its last turn. It only calls a session waiting on a clear sign: a question tool, a plan, a permission prompt, or a final message that asks something after no work.
 - It groups sessions by git project, so a worktree counts with its main repo.
 - "Away" runs from your last message to an AI session in the project. A project with no message from you looks back 8 hours. `--since` overrides both. Your own file edits don't move it.
+- A session you picked (resumed with its number, or opened its recap) leaves the list until it does something new. Looking at the list doesn't count. Waiting sessions always stay, and `--since` shows picked ones again.
 - Your own edits are the uncommitted files that no session's file-edit tool calls account for.
 
 Limits: files an agent changes through a shell command (Claude's Bash, Codex's shell, Gemini's shell: formatters, `sed -i`, codegen) can't be told apart from your own edits, so they show up in the You row.
@@ -273,7 +274,7 @@ Limits: files an agent changes through a shell command (Claude's Bash, Codex's s
 
 **"brb found no AI sessions from the last 7 days."** brb only reads sessions from the last week. If a tool keeps its history somewhere else, set `CLAUDE_CONFIG_DIR` or `CODEX_HOME` the same way you set it for the tool.
 
-**"nothing moved".** Nothing changed since your last message in this project. Use `--since 1d` to look further back.
+**"nothing moved".** Nothing changed since your last message in this project, or you already picked everything that did. Use `--since 1d` to look further back.
 
 **"no session 5: pick 1 to 4".** The list changed since you looked, or you ran it with different options. Run `brb` again and use the new number.
 

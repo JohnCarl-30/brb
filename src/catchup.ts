@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import { classify } from './classify';
 import type { Change, Todo } from './git';
 import { projectFor, realpath, type Project } from './projects';
+import { seenKey } from './seen';
 import { oneLine } from './text';
 import type { PermissionRequest, Session, Status, Tool } from './types';
 
@@ -25,6 +26,7 @@ export interface CatchUpInput {
   now: number; cwd: string; home: string;
   sessions: Session[];
   permissions: Map<string, PermissionRequest>;   // keyed by Claude session id
+  seen?: Map<string, number>;                    // when you last picked each session, keyed by seenKey
   git: { root: string; branch: string | null; yours: Change[]; todos: Todo[] } | null;  // HERE only; yours already excludes agent edits
   excludeSessionId?: string; sinceMs?: number; warnings: string[];
 }
@@ -93,8 +95,10 @@ export function buildCatchUp(input: CatchUpInput): CatchUp {
     .flatMap((s): Row[] => {
       const project = projectFor(s.cwd);
       const verdict = classify(s, now, input.permissions.get(s.id));
-      // A waiting session stays listed however old it is; the rest only if they moved since you were last here.
-      if (verdict.status !== 'waiting' && s.lastActivityAt <= windowStart(project.key)) return [];
+      // A waiting session stays listed however old it is; the rest only if they moved since you were last here
+      // and since you last picked them. --since asks for everything in that time, picked or not.
+      const pickedAt = input.sinceMs === undefined ? (input.seen?.get(seenKey(s.tool, s.id)) ?? -Infinity) : -Infinity;
+      if (verdict.status !== 'waiting' && s.lastActivityAt <= Math.max(windowStart(project.key), pickedAt)) return [];
       return [{
         tool: s.tool, sessionId: s.id, title: s.title, status: verdict.status, detail: verdict.detail,
         at: s.lastActivityAt, project, cwd: s.cwd, branch: s.branch,
