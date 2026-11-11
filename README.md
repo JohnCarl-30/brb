@@ -157,8 +157,10 @@ Run `npx @john_carl/brb --brief` before starting a task.
 set -g status-right '#(brb --count)'
 
 # Claude Code status line (~/.claude/settings.json), leaving out the session you're in
-"statusLine": { "type": "command", "command": "brb --count --exclude \"$(jq -r .session_id)\"" }
+"statusLine": { "type": "command", "command": "brb --count --exclude \"$(jq -r .session_id)\"", "refreshInterval": 10 }
 ```
+
+The Claude Code line needs `jq`, which reads the session's id from what Claude Code sends the command. `refreshInterval` re-runs it every 10 seconds: without it the line only updates when your own session does something, so it would miss another session finishing while yours sits idle.
 
 ## AI summaries
 
