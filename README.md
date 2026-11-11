@@ -292,7 +292,7 @@ npm run typecheck
 npm run build       # bundles dist/brb.mjs
 ```
 
-The plugin runs `dist/brb.mjs` straight from the repo, so rebuild and commit it with every change to `src/`. Tests run against a made-up home folder and never read your real sessions. `npm run demo:seed` builds the demo world used for the GIF.
+The plugin runs `dist/brb.mjs` straight from the repo, so it is committed. `npm ci` sets up a pre-commit hook that rebuilds it with every commit, and CI fails on a stale one. Tests run against a made-up home folder and never read your real sessions. `npm run demo:seed` builds the demo world used for the GIF.
 
 ## License
 

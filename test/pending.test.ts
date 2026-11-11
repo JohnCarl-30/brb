@@ -76,3 +76,14 @@ test('a fresh permission request turns a session into waiting', async () => {
   recordPermissionRequest(h.brb, 'clean-build', 'Claude needs your permission to use Bash', min(3) + 1_000);
   expect(await rowOf()).toMatchObject({ status: 'waiting', detail: 'Claude needs your permission to use Bash' });
 });
+
+test.skipIf(process.platform === 'win32')('the markers and their folders are private to the user', () => {
+  const brb = path.join(tmp, 'private', '.brb');
+  const file = path.join(brb, 'pending', 'claude-s1.json');
+  const mode = (p: string) => fs.statSync(p).mode & 0o777;
+  recordPermissionRequest(brb, 's1', 'Claude needs your permission to use Bash', NOW);
+  expect([mode(brb), mode(path.dirname(file)), mode(file)]).toEqual([0o700, 0o700, 0o600]);
+  fs.chmodSync(file, 0o644); // a marker left by an older brb
+  recordPermissionRequest(brb, 's1', 'Claude needs your permission to use Edit', NOW);
+  expect(mode(file)).toBe(0o600);
+});

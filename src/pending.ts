@@ -9,8 +9,11 @@ const MARKER = /^claude-([\w-]+)\.json$/;
 export function recordPermissionRequest(brbHome: string, sessionId: string, message: string, now: number): void {
   if (!/^[\w-]+$/.test(sessionId)) return; // the id comes from hook input and becomes a file name, so it must not hold a path
   const dir = path.join(brbHome, 'pending');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, `claude-${sessionId}.json`), JSON.stringify({ at: now, message }));
+  // Private, like the summary cache: the message can name the command a session wants to run.
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = path.join(dir, `claude-${sessionId}.json`);
+  fs.writeFileSync(file, JSON.stringify({ at: now, message }), { mode: 0o600 });
+  fs.chmodSync(file, 0o600); // writeFileSync's mode only applies to a new file
 }
 
 // Markers older than the scan window can no longer matter, so they are deleted. One that can't be read is skipped.

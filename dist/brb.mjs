@@ -1029,8 +1029,10 @@ var MARKER = /^claude-([\w-]+)\.json$/;
 function recordPermissionRequest(brbHome, sessionId, message, now) {
   if (!/^[\w-]+$/.test(sessionId)) return;
   const dir = path5.join(brbHome, "pending");
-  fs3.mkdirSync(dir, { recursive: true });
-  fs3.writeFileSync(path5.join(dir, `claude-${sessionId}.json`), JSON.stringify({ at: now, message }));
+  fs3.mkdirSync(dir, { recursive: true, mode: 448 });
+  const file = path5.join(dir, `claude-${sessionId}.json`);
+  fs3.writeFileSync(file, JSON.stringify({ at: now, message }), { mode: 384 });
+  fs3.chmodSync(file, 384);
 }
 function readPermissionRequests(brbHome, now) {
   const dir = path5.join(brbHome, "pending");

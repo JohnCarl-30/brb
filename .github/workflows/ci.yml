@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main] # a branch's commits are tested by its pull request
   pull_request:
 
 jobs:
