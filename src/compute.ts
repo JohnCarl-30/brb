@@ -6,11 +6,11 @@ import { addedTodos, readGit } from './git';
 import { readPermissionRequests } from './pending';
 import { projectFor, realpath } from './projects';
 
-export async function computeCatchUp(o: { env: NodeJS.ProcessEnv; cwd: string; now: number; excludeSessionId?: string; sinceMs?: number }): Promise<CatchUp> {
+export async function computeCatchUp(o: { env: NodeJS.ProcessEnv; cwd: string; now: number; excludeSessionId?: string; sinceMs?: number; skipGit?: boolean }): Promise<CatchUp> {
   const roots = resolveRoots(o.env);
   const { sessions, warnings } = await loadAllSessions(roots, o.now);
 
-  const snapshot = readGit(o.cwd);
+  const snapshot = o.skipGit ? null : readGit(o.cwd);
   let git = null;
   if (snapshot) {
     // "You" is what git shows minus what an agent edited, so a file an agent touched isn't blamed on you.

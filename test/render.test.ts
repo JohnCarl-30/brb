@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import { buildCatchUp, type CatchUpInput } from '../src/catchup';
-import { renderBrief, renderJson, renderTerminal, shownElsewhere } from '../src/render';
+import { renderBrief, renderCount, renderJson, renderTerminal, shownElsewhere } from '../src/render';
+import type { Status } from '../src/types';
 import { EXPECTED_BRIEF, EXPECTED_TERMINAL, IDS, NOW, scenarioCatchUp } from './support/expected';
 
 const plain = { color: false, columns: 100, all: false };
@@ -178,4 +179,53 @@ test('ELSEWHERE shows at most 10 rows, always keeping the ones that need you, an
   expect(out.match(/^ +\d+ [◐●✕]/gm)).toHaveLength(13); // 3 HERE + 10 ELSEWHERE
   expect(renderTerminal(c, { ...plain, all: true })).not.toContain('more ·');
   expect(shownElsewhere(c, false).map((r) => r.title).at(-1)).toBe('broke');
+});
+
+// ---- brb --count: one line for a prompt or status line
+
+const withStatuses = (here: Status[], elsewhere: Status[] = []) => {
+  const c = scenarioCatchUp();
+  const [first] = c.here!.rows;
+  c.here!.rows = here.map((status) => ({ ...first, status }));
+  c.elsewhere = elsewhere.map((status) => ({ ...c.elsewhere[0], status }));
+  return c;
+};
+
+test('counts the demo scenario across HERE and ELSEWHERE', () => {
+  expect(renderCount(scenarioCatchUp())).toBe('1 waiting · 1 stopped · 2 finished');
+});
+
+test('the count is empty when no session moved, even with edits of your own', () => {
+  expect(renderCount({ ...scenarioCatchUp(), here: null, elsewhere: [] })).toBe('');
+  expect(renderCount(withStatuses([]))).toBe(''); // here.you is still set
+});
+
+test('the count goes most urgent first, whatever order the rows are in', () => {
+  expect(renderCount(withStatuses(['working', 'finished', 'failed', 'waiting']))).toBe('1 waiting · 1 stopped · 1 finished · 1 working');
+});
+
+test('the count leaves out a status with no sessions', () => {
+  expect(renderCount(withStatuses(['working', 'working']))).toBe('2 working');
+  expect(renderCount(withStatuses(['waiting', 'finished', 'finished']))).toBe('1 waiting · 2 finished');
+});
+
+test('idle sessions are never counted', () => {
+  expect(renderCount(withStatuses(['idle', 'idle'], ['idle']))).toBe('');
+  expect(renderCount(withStatuses(['idle', 'waiting']))).toBe('1 waiting');
+});
+
+test('the count works with no HERE section', () => {
+  expect(renderCount({ ...withStatuses([], ['waiting', 'failed']), here: null })).toBe('1 waiting · 1 stopped');
+});
+
+test('the count takes in ELSEWHERE rows the screen would cut off', () => {
+  const c = withStatuses([], Array<Status>(25).fill('finished'));
+  expect(shownElsewhere(c, false)).toHaveLength(10);
+  expect(renderCount(c)).toBe('25 finished');
+});
+
+test('the count holds nothing from a session: digits, the four words and separators only', () => {
+  const c = scenarioCatchUp();
+  for (const r of [...c.here!.rows, ...c.elsewhere]) Object.assign(r, { title: '\x1b[2J evil', detail: '\x1b]0;x\x07', summary: '\n\r' });
+  expect(renderCount(c)).toMatch(/^\d+ (waiting|stopped|finished|working)( · \d+ (waiting|stopped|finished|working))*$/);
 });
