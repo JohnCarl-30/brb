@@ -106,7 +106,7 @@ import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 
 // package.json
-var version = "0.6.0";
+var version = "0.7.0";
 
 // src/adapters/index.ts
 import * as os from "os";
