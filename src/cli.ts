@@ -9,7 +9,7 @@ import { computeCatchUp } from './compute';
 import { runHook } from './hooks';
 import { realpath } from './projects';
 import { writeRecap } from './recap';
-import { renderBrief, renderJson, renderTerminal, shownElsewhere } from './render';
+import { renderBrief, renderCount, renderJson, renderTerminal, shownElsewhere } from './render';
 import { defaultRunner, onPath, summarizeRows, summaryKey, type Runner } from './summarize';
 import { commandText } from './text';
 import { parseSince } from './time';
@@ -24,6 +24,7 @@ Usage: brb [options]
   --since <time>   look back this far, e.g. 30m, 2h, 1d
   --json           print the catch-up as JSON
   --brief          short plain-text catch-up for AI agents
+  --count          one line of totals for a prompt or status line
   --no-ai          skip AI summaries and recaps
   --no-color       plain output
   --exclude <id>   leave out one session
@@ -55,7 +56,7 @@ export async function run(o: RunOptions): Promise<RunResult> {
       args: o.argv,
       allowPositionals: true,
       options: {
-        all: { type: 'boolean' }, since: { type: 'string' }, json: { type: 'boolean' }, brief: { type: 'boolean' },
+        all: { type: 'boolean' }, since: { type: 'string' }, json: { type: 'boolean' }, brief: { type: 'boolean' }, count: { type: 'boolean' },
         'no-ai': { type: 'boolean' }, 'no-color': { type: 'boolean' }, exclude: { type: 'string' },
         help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
       },
@@ -74,6 +75,13 @@ export async function run(o: RunOptions): Promise<RunResult> {
   if (show && (extra.length > 0 || !isNumber)) return fail('give one session number, e.g. brb show 2');
   if (show && (values.json || values.brief)) return fail('brb show makes a page, so it takes no --json or --brief');
   if (extra.length > 0 || (pick !== undefined && !isNumber)) return fail('give one session number, e.g. brb 2');
+
+  if (values.count) {
+    if (show || pick !== undefined || values.json || values.brief) return fail('--count prints one line, so it takes no session number, --json or --brief');
+    // No git: the totals don't use it, and a status line runs this every few seconds.
+    const count = renderCount(await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs, skipGit: true }));
+    return { stdout: count === '' ? '' : count + '\n', exitCode: 0 };
+  }
 
   const c = await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs });
   // Numbered in the order the screen shows them: HERE, then ELSEWHERE.

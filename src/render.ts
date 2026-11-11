@@ -125,5 +125,16 @@ export function renderBrief(c: CatchUp): string {
   return lines.join('\n');
 }
 
+// One line for a shell prompt or status line: how many sessions are in each state, everywhere, most urgent first.
+// Nothing when none moved. Idle is left out: it asks nothing of you. Only digits and these words, so it needs no cleaning.
+const COUNTED: [Status, string][] = [['waiting', 'waiting'], ['failed', 'stopped'], ['finished', 'finished'], ['working', 'working']];
+export function renderCount(c: CatchUp): string {
+  const rows = [...(c.here?.rows ?? []), ...c.elsewhere];
+  return COUNTED.flatMap(([status, word]) => {
+    const n = rows.filter((r) => r.status === status).length;
+    return n > 0 ? [`${n} ${word}`] : [];
+  }).join(' · ');
+}
+
 // longText is the source for an AI one-liner and file is where a recap reads from, not things to hand to other programs.
 export const renderJson = (c: CatchUp): string => JSON.stringify(c, (key, value) => (key === 'longText' || key === 'file' ? undefined : value), 2);

@@ -148,6 +148,18 @@ Run `npx @john_carl/brb --brief` before starting a task.
 
 `--brief` prints a few plain-text lines about the other sessions in the project, and nothing when there is nothing to report. `--json` prints the whole catch-up for scripts.
 
+## In your prompt or status line
+
+`brb --count` prints one line of totals across every project, such as `1 waiting · 1 stopped · 2 finished`, and nothing when no session moved. It is plain text with no color, asks no AI and runs no git, so it is cheap to call often. Idle sessions aren't counted.
+
+```
+# tmux
+set -g status-right '#(brb --count)'
+
+# Claude Code status line (~/.claude/settings.json), leaving out the session you're in
+"statusLine": { "type": "command", "command": "brb --count --exclude \"$(jq -r .session_id)\"" }
+```
+
 ## AI summaries
 
 In a terminal, brb prints the facts first. Then it asks for one-line summaries of finished and stopped sessions and redraws the screen with them. You never wait on AI to see the list, and Ctrl-C skips the summaries.
@@ -156,7 +168,7 @@ In a terminal, brb prints the facts first. Then it asks for one-line summaries o
 - These runs use your existing login for that CLI, so they count toward that tool's usage like any other prompt. brb holds no key.
 - brb summarizes at most 8 sessions per run and gives each 20 seconds. Summaries are cached in `~/.brb/cache/summaries.json`, so a session that hasn't moved is never summarized twice.
 - The summary runs stay out of your history and out of brb's list. They run in a private `brb-summaries` folder in your temp folder, which brb skips.
-- brb asks no AI at all without a terminal, with `--json` or `--brief`, with `--no-ai`, or with `BRB_NO_AI=1`.
+- brb asks no AI at all without a terminal, with `--json`, `--brief` or `--count`, with `--no-ai`, or with `BRB_NO_AI=1`.
 
 ## Privacy
 
@@ -185,6 +197,7 @@ Usage: brb [options]
   --since <time>   look back this far, e.g. 30m, 2h, 1d
   --json           print the catch-up as JSON
   --brief          short plain-text catch-up for AI agents
+  --count          one line of totals for a prompt or status line
   --no-ai          skip AI summaries and recaps
   --no-color       plain output
   --exclude <id>   leave out one session

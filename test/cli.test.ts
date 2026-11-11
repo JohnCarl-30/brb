@@ -205,3 +205,57 @@ test('openCommand opens a page the platform\'s own way', () => {
   expect(openCommand('linux')).toEqual(['xdg-open']);
   expect(openCommand('win32')).toEqual(['cmd', '/c', 'start', '']); // an empty window title, quoted by Node as ""
 });
+
+// ---- brb --count
+
+const COUNT = '1 waiting · 1 stopped · 2 finished\n';
+
+test('--count prints one plain line', async () => {
+  expect(await brb(['--count'])).toEqual({ stdout: COUNT, exitCode: 0 });
+});
+
+test('--count is the same from any folder, repo or not', async () => {
+  expect((await brb(['--count'], world.home)).stdout).toBe(COUNT);
+  expect((await brb(['--count'], path.join(tmp, 'no-such-folder'))).stdout).toBe(COUNT);
+});
+
+test('--count prints nothing at all when there are no sessions', async () => {
+  const empty = fs.mkdtempSync(path.join(tmp, 'empty-home-'));
+  expect(await run({ argv: ['--count'], env: { HOME: empty }, cwd: empty, now: NOW, isTTY: false })).toEqual({ stdout: '', exitCode: 0 });
+});
+
+test('--count in a terminal is still plain: no color, no AI, no question', async () => {
+  const runner = vi.fn();
+  const result = await run({ argv: ['--count'], env: { HOME: world.home }, cwd: world.repo, now: NOW, isTTY: true, runner, which: () => true });
+  expect(result).toEqual({ stdout: COUNT, exitCode: 0 }); // no rerender, pending, choices or recap
+  expect(runner).not.toHaveBeenCalled();
+});
+
+test('--count --exclude leaves out that session', async () => {
+  expect((await brb(['--count', '--exclude', IDS.wait])).stdout).toBe('1 stopped · 2 finished\n');
+  expect((await brb(['--count', '--exclude', IDS.blog])).stdout).toBe('1 waiting · 1 stopped · 1 finished\n');
+});
+
+test('--count --since keeps a waiting session however old, and drops the rest outside the window', async () => {
+  expect((await brb(['--count', '--since', '1m'])).stdout).toBe('1 waiting\n');
+  expect((await brb(['--count', '--since', '1d'])).stdout).toBe(COUNT);
+});
+
+test('--count takes --all and --no-ai without changing', async () => {
+  expect((await brb(['--count', '--all', '--no-ai', '--no-color'])).stdout).toBe(COUNT);
+});
+
+test.each([['--json'], ['--brief'], ['2'], ['show', '2']])('--count with %s exits 1', async (...extra) => {
+  const { stdout, exitCode } = await brb(['--count', ...extra]);
+  expect(exitCode).toBe(1);
+  expect(stdout).toBe('brb: --count prints one line, so it takes no session number, --json or --brief\nRun brb --help for usage.\n');
+});
+
+test('--count writes nothing to brb home', async () => {
+  await brb(['--count']);
+  expect(fs.existsSync(path.join(world.home, '.brb', 'cache'))).toBe(false);
+});
+
+test('--help lists --count', () => {
+  expect(HELP).toContain('  --count          one line of totals for a prompt or status line');
+});

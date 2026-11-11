@@ -1060,7 +1060,7 @@ function readPermissionRequests(brbHome, now) {
 async function computeCatchUp(o) {
   const roots = resolveRoots(o.env);
   const { sessions, warnings } = await loadAllSessions(roots, o.now);
-  const snapshot = readGit(o.cwd);
+  const snapshot = o.skipGit ? null : readGit(o.cwd);
   let git2 = null;
   if (snapshot) {
     const agent = agentEditedFiles(sessions, projectFor(o.cwd).key);
@@ -1187,6 +1187,14 @@ function renderBrief(c) {
     lines.push(`\u2022 The user has uncommitted edits in ${files}. Don't overwrite them.`);
   }
   return lines.join("\n");
+}
+var COUNTED = [["waiting", "waiting"], ["failed", "stopped"], ["finished", "finished"], ["working", "working"]];
+function renderCount(c) {
+  const rows = [...c.here?.rows ?? [], ...c.elsewhere];
+  return COUNTED.flatMap(([status, word]) => {
+    const n = rows.filter((r) => r.status === status).length;
+    return n > 0 ? [`${n} ${word}`] : [];
+  }).join(" \xB7 ");
 }
 var renderJson = (c) => JSON.stringify(c, (key, value) => key === "longText" || key === "file" ? void 0 : value, 2);
 
@@ -1495,6 +1503,7 @@ Usage: brb [options]
   --since <time>   look back this far, e.g. 30m, 2h, 1d
   --json           print the catch-up as JSON
   --brief          short plain-text catch-up for AI agents
+  --count          one line of totals for a prompt or status line
   --no-ai          skip AI summaries and recaps
   --no-color       plain output
   --exclude <id>   leave out one session
@@ -1518,6 +1527,7 @@ async function run(o) {
         since: { type: "string" },
         json: { type: "boolean" },
         brief: { type: "boolean" },
+        count: { type: "boolean" },
         "no-ai": { type: "boolean" },
         "no-color": { type: "boolean" },
         exclude: { type: "string" },
@@ -1539,6 +1549,11 @@ async function run(o) {
   if (show && (extra.length > 0 || !isNumber)) return fail("give one session number, e.g. brb show 2");
   if (show && (values.json || values.brief)) return fail("brb show makes a page, so it takes no --json or --brief");
   if (extra.length > 0 || pick !== void 0 && !isNumber) return fail("give one session number, e.g. brb 2");
+  if (values.count) {
+    if (show || pick !== void 0 || values.json || values.brief) return fail("--count prints one line, so it takes no session number, --json or --brief");
+    const count = renderCount(await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs, skipGit: true }));
+    return { stdout: count === "" ? "" : count + "\n", exitCode: 0 };
+  }
   const c = await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs });
   const listed = [...c.here?.rows ?? [], ...shownElsewhere(c, values.all ?? false)];
   const noAi = values["no-ai"] || o.env.BRB_NO_AI === "1";
