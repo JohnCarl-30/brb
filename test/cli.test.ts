@@ -102,13 +102,15 @@ test('redraw leaves a screen that scrolled alone, apart from the summarizing lin
 
 test('brb <number> hands the terminal to that session, numbered HERE then ELSEWHERE', async () => {
   const here = await run({ argv: ['1'], env: { HOME: world.home }, cwd: world.repo, now: NOW, isTTY: true });
-  expect(here).toEqual({ stdout: `→ claude --resume ${IDS.wait}\n`, exitCode: 0, exec: `claude --resume ${IDS.wait}` });
+  expect(here).toMatchObject({ stdout: `→ claude --resume ${IDS.wait}\n`, exitCode: 0, exec: `claude --resume ${IDS.wait}`, picked: 1 });
   const elsewhere = await run({ argv: ['4'], env: { HOME: world.home }, cwd: world.repo, now: NOW, isTTY: true });
   expect(elsewhere.exec).toMatch(new RegExp(`^cd .+blog && gemini --resume ${IDS.blog}$`));
 });
 
 test('brb <number> only prints the command without a terminal', async () => {
-  expect(await brb(['3'])).toEqual({ stdout: `→ codex resume ${IDS.fail}\n`, exitCode: 0, exec: undefined });
+  const printed = await brb(['3']);
+  expect(printed).toMatchObject({ stdout: `→ codex resume ${IDS.fail}\n`, exitCode: 0, picked: 3 });
+  expect(printed.exec).toBeUndefined();
 });
 
 test('brb <number> rejects a number that is not on the list', async () => {

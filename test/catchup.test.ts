@@ -176,3 +176,30 @@ test('treats a symlink to this folder as this folder', () => {
   const c = buildCatchUp(input({ cwd: app, home: tmp, sessions: [s], git: { root: app, branch: 'main', yours: [], todos: [] } }));
   expect(c.here?.rows[0].resume).toBe('claude --resume c-link');
 });
+
+const seenAt = (m: number, id = 'c-done', tool = 'claude') => new Map([[`${tool}-${id}`, min(m)]]);
+
+test('leaves out a session you picked after it last moved', () => {
+  expect(hereIds(buildCatchUp(input({ seen: seenAt(5) })))).toEqual(['c-wait', 'x-fail']);
+});
+
+test('brings a picked session back once it moves again', () => {
+  expect(hereIds(buildCatchUp(input({ seen: seenAt(13) })))).toEqual(['c-wait', 'c-done', 'x-fail']); // picked at 13 min ago, finished at 12
+});
+
+test('a waiting session stays listed even after you picked it', () => {
+  expect(hereIds(buildCatchUp(input({ seen: seenAt(1, 'c-wait') })))).toContain('c-wait');
+});
+
+test('a pick only hides that tool\'s session, in any project', () => {
+  expect(hereIds(buildCatchUp(input({ seen: seenAt(1, 'c-done', 'codex') })))).toContain('c-done');
+  expect(buildCatchUp(input({ seen: seenAt(1, 'g-1', 'gemini') })).elsewhere).toEqual([]);
+});
+
+test('--since shows picked sessions again', () => {
+  expect(hereIds(buildCatchUp(input({ seen: seenAt(5), sinceMs: 7_200_000 })))).toContain('c-done');
+});
+
+test('a picked session still counts as a session brb found', () => {
+  expect(buildCatchUp(input({ seen: seenAt(5) })).sessions).toBe(4);
+});
