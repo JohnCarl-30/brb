@@ -1,0 +1,11 @@
+{
+  "description": "brb: brief each new Codex session on your other sessions, and mark a session waiting when it asks for approval.",
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "startup|resume", "hooks": [ { "type": "command", "command": "command -v node >/dev/null 2>&1 && node \"${PLUGIN_ROOT}/dist/brb.mjs\" hook session-start codex || true", "timeout": 10, "statusMessage": "brb: checking your other sessions" } ] }
+    ],
+    "PermissionRequest": [
+      { "hooks": [ { "type": "command", "command": "command -v node >/dev/null 2>&1 && node \"${PLUGIN_ROOT}/dist/brb.mjs\" hook permission-request codex || true", "timeout": 5, "async": true } ] }
+    ]
+  }
+}

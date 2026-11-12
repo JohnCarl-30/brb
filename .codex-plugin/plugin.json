@@ -1,0 +1,20 @@
+{
+  "name": "brb",
+  "version": "0.8.0",
+  "description": "When you're back, see what every AI session did: Claude Code, Codex, Gemini and your own edits.",
+  "author": { "name": "JohnCarl-30" },
+  "homepage": "https://github.com/JohnCarl-30/brb",
+  "repository": "https://github.com/JohnCarl-30/brb",
+  "license": "MIT",
+  "skills": "./codex/skills/",
+  "hooks": "./codex/hooks.json",
+  "interface": {
+    "displayName": "brb",
+    "shortDescription": "Catch up on every AI coding session when you're back",
+    "developerName": "JohnCarl-30",
+    "category": "Developer Tools",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/JohnCarl-30/brb",
+    "defaultPrompt": ["Run brb and show me what my other sessions did"]
+  }
+}

@@ -6,7 +6,8 @@ import { HOOK_HINT } from '../src/catchup';
 import { run } from '../src/cli';
 import { runHook } from '../src/hooks';
 import { readPermissionRequests } from '../src/pending';
-import { cl, writeClaudeSession } from './support/fake-home';
+import { cl, cx, writeClaudeSession, writeCodexSession } from './support/fake-home';
+import pkg from '../package.json';
 import { EXPECTED_BRIEF, NOW } from './support/expected';
 import { seedScenario } from './support/scenario';
 
@@ -105,4 +106,72 @@ test('the plugin tip shows for a quiet Claude tool call until any hook has run',
   await hook('session-start', 'not json', w.home); // even a run that fails on its input shows the hooks are installed
   expect(await list()).not.toContain('tip:');
   if (process.platform !== 'win32') expect(fs.statSync(path.join(h.brb, 'hooks-on')).mode & 0o777).toBe(0o600);
+});
+
+// ---- Codex: the same hooks, run by Codex's plugin with a third argument of `codex`.
+const codexHook = (name: string, input: object, home: string, cwd = world.repo) => {
+  const stdin = JSON.stringify(input);
+  return runHook(name, stdin, { argv: ['hook', name, 'codex'], env: { HOME: home }, cwd, now: NOW, isTTY: false, stdin });
+};
+
+test.each([
+  ['its own reason when it gives one', { tool_name: 'Bash', tool_input: { command: 'rm -rf build', description: 'Needs network access\nto install' } }, 'Needs network access to install'],
+  ['the command for a shell call', { tool_name: 'Bash', tool_input: { command: 'npm run migrate' } }, 'Codex needs your approval to run npm run migrate'],
+  ['"edit files" for a patch, never the patch text', { tool_name: 'apply_patch', tool_input: { command: '*** Begin Patch\n+secret' } }, 'Codex needs your approval to edit files'],
+  ['the tool name for anything else', { tool_name: 'mcp__fs__write', tool_input: { path: '/x' } }, 'Codex needs your approval to use mcp__fs__write'],
+  ['a plain line when the input says nothing', {}, 'Codex needs your approval'],
+])('the Codex permission hook records %s, and prints nothing so the user still decides', async (_what, input, message) => {
+  const home = path.join(tmp, `codex-ask-${message.length}`);
+  expect(await codexHook('permission-request', { session_id: 'thr-1', hook_event_name: 'PermissionRequest', ...input }, home)).toEqual({ stdout: '', exitCode: 0 });
+  expect(readPermissionRequests(path.join(home, '.brb'), NOW)).toEqual(new Map([['thr-1', { at: NOW, message }]]));
+  expect(fs.readdirSync(path.join(home, '.brb', 'pending'))).toEqual(['codex-thr-1.json']);
+});
+
+test('the Codex permission hook cuts a long command and writes nothing without a session id', async () => {
+  const home = path.join(tmp, 'codex-long');
+  await codexHook('permission-request', { tool_name: 'Bash', tool_input: { command: 'x'.repeat(500) } }, home);
+  expect(fs.existsSync(path.join(home, '.brb', 'pending'))).toBe(false);
+  await codexHook('permission-request', { session_id: 'thr-2', tool_name: 'Bash', tool_input: { command: 'x'.repeat(500) } }, home);
+  expect(readPermissionRequests(path.join(home, '.brb'), NOW).get('thr-2')!.message).toHaveLength(80);
+});
+
+test('a Codex session that asks for approval shows as waiting on you, with what it asked', async () => {
+  const w = seedScenario(path.join(tmp, 'codex-wait'), NOW);
+  const h = { home: w.home, claude: path.join(w.home, '.claude'), codex: path.join(w.home, '.codex'), gemini: path.join(w.home, '.gemini'), kiro: path.join(w.home, '.kiro'), brb: path.join(w.home, '.brb') };
+  const id = '019b1111-0000-7000-8000-00000000000a';
+  const min = (m: number) => NOW - m * 60_000;
+  writeCodexSession(h, { id, threadName: 'run the migration', lines: [cx.meta(id, w.repo, min(4)), cx.started(min(4)), cx.user('run the migration', min(4)), cx.say('Running it now.', min(3))] });
+  const row = async () => {
+    const { stdout } = await run({ argv: ['--json'], env: { HOME: w.home }, cwd: w.repo, now: NOW, isTTY: false });
+    return JSON.parse(stdout).here.rows.find((r: { sessionId: string }) => r.sessionId === id);
+  };
+  expect((await row())?.status).not.toBe('waiting');
+  await codexHook('permission-request', { session_id: id, cwd: w.repo, tool_name: 'Bash', tool_input: { command: 'npm run migrate' } }, w.home, w.repo);
+  expect(await row()).toMatchObject({ tool: 'codex', status: 'waiting', detail: 'Codex needs your approval to run npm run migrate' });
+});
+
+test('the Codex session-start hook briefs like Claude\'s, leaves the Codex session out, and does not count as Claude\'s hooks being on', async () => {
+  const w = seedScenario(path.join(tmp, 'codex-start'), NOW);
+  const id = '019a0000-0000-7000-8000-000000000003'; // the scenario's own Codex session, now the one starting
+  const { stdout } = await codexHook('session-start', { session_id: id, cwd: w.repo, hook_event_name: 'SessionStart', source: 'resume', model: 'gpt-5' }, w.home, '/');
+  const out = JSON.parse(stdout);
+  expect(out.systemMessage).toBe('brb: 2 other sessions in this project · 1 waiting on you');
+  expect(out.hookSpecificOutput).toMatchObject({ hookEventName: 'SessionStart' });
+  expect(out.hookSpecificOutput.additionalContext).not.toContain('upgrade to Next 16');
+  expect(fs.existsSync(path.join(w.home, '.brb', 'hooks-on'))).toBe(false);
+  await hook('session-start', '{}', w.home); // Claude's does
+  expect(fs.existsSync(path.join(w.home, '.brb', 'hooks-on'))).toBe(true);
+});
+
+// The plugin files Codex reads. A hook name brb doesn't handle would fail silently, and a stale version shows in `codex plugin list`.
+test('the Codex plugin points at files that exist, hooks brb handles, and the package version', () => {
+  const root = new URL('..', import.meta.url);
+  const read = (file: string) => JSON.parse(fs.readFileSync(new URL(file, root), 'utf8'));
+  const manifest = read('.codex-plugin/plugin.json');
+  expect([manifest.version, read('.claude-plugin/plugin.json').version]).toEqual([pkg.version, pkg.version]);
+  expect(fs.existsSync(new URL(`${manifest.skills}brb/SKILL.md`, root))).toBe(true);
+  const hooks = read(manifest.hooks).hooks;
+  expect(Object.keys(hooks)).toEqual(['SessionStart', 'PermissionRequest']);
+  const commands = Object.values(hooks).flat().flatMap((g) => (g as { hooks: { command: string }[] }).hooks.map((x) => x.command));
+  expect(commands.map((c) => /brb\.mjs" hook ([\w-]+) codex \|\| true$/.exec(c)?.[1])).toEqual(['session-start', 'permission-request']);
 });

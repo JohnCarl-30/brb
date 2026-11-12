@@ -27,7 +27,7 @@ export interface CatchUp {
 export interface CatchUpInput {
   now: number; cwd: string; home: string;
   sessions: Session[];
-  permissions: Map<string, PermissionRequest>;   // keyed by Claude session id
+  permissions: Map<string, PermissionRequest>;   // keyed by session id (Claude and Codex)
   seen?: Map<string, number>;                    // when you last picked each session, keyed by seenKey
   hooksOff?: boolean;                            // the plugin's hooks have never run, so permission prompts can't be seen
   git: { root: string; branch: string | null; yours: Change[]; todos: Todo[] } | null;  // HERE only; yours already excludes agent edits

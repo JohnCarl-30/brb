@@ -1060,7 +1060,7 @@ function addedTodos(root, files) {
 // src/pending.ts
 import * as fs4 from "fs";
 import * as path6 from "path";
-var MARKER = /^claude-([\w-]+)\.json$/;
+var MARKER = /^(?:claude|codex)-([\w-]+)\.json$/;
 var hooksMarker = (brbHome) => path6.join(brbHome, "hooks-on");
 var hooksHaveRun = (brbHome) => fs4.existsSync(hooksMarker(brbHome));
 function recordHookRun(brbHome) {
@@ -1068,11 +1068,11 @@ function recordHookRun(brbHome) {
   fs4.mkdirSync(brbHome, { recursive: true, mode: 448 });
   fs4.writeFileSync(hooksMarker(brbHome), "", { mode: 384 });
 }
-function recordPermissionRequest(brbHome, sessionId, message, now) {
+function recordPermissionRequest(brbHome, sessionId, message, now, tool = "claude") {
   if (!/^[\w-]+$/.test(sessionId)) return;
   const dir = path6.join(brbHome, "pending");
   fs4.mkdirSync(dir, { recursive: true, mode: 448 });
-  const file = path6.join(dir, `claude-${sessionId}.json`);
+  const file = path6.join(dir, `${tool}-${sessionId}.json`);
   fs4.writeFileSync(file, JSON.stringify({ at: now, message }), { mode: 384 });
   fs4.chmodSync(file, 384);
 }
@@ -1248,10 +1248,18 @@ var renderJson = (c) => JSON.stringify(c, (key, value) => key === "longText" || 
 
 // src/hooks.ts
 var QUIET = { stdout: "", exitCode: 0 };
+function codexAsk(input) {
+  const tool = typeof input.tool_name === "string" ? input.tool_name : "";
+  const { description, command } = input.tool_input ?? {};
+  if (typeof description === "string" && description.trim() !== "") return description;
+  if (tool === "apply_patch") return "Codex needs your approval to edit files";
+  if (tool === "Bash" && typeof command === "string") return `Codex needs your approval to run ${command}`;
+  return `Codex needs your approval${tool ? ` to use ${tool}` : ""}`;
+}
 async function runHook(name, stdin, o) {
   if (o.env.BRB_INTERNAL === "1") return QUIET;
   try {
-    if (name === "notification" || name === "session-start") recordHookRun(resolveRoots(o.env).brb);
+    if ((name === "notification" || name === "session-start") && o.argv[2] !== "codex") recordHookRun(resolveRoots(o.env).brb);
     const input = JSON.parse(stdin) ?? {};
     const sessionId = typeof input.session_id === "string" ? input.session_id : void 0;
     if (name === "notification") {
@@ -1259,6 +1267,10 @@ async function runHook(name, stdin, o) {
       if (sessionId !== void 0 && (/permission/i.test(message) || input.notification_type === "permission_prompt")) {
         recordPermissionRequest(resolveRoots(o.env).brb, sessionId, oneLine(message, 80), o.now);
       }
+      return QUIET;
+    }
+    if (name === "permission-request") {
+      if (sessionId !== void 0) recordPermissionRequest(resolveRoots(o.env).brb, sessionId, oneLine(codexAsk(input), 80), o.now, "codex");
       return QUIET;
     }
     if (name === "session-start") {
