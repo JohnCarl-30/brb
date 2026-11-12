@@ -103,7 +103,7 @@ Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus C
 | Tool | Reads | Detects "waiting on you" |
 |---|---|---|
 | Claude Code | `~/.claude/projects` | Questions, plans and permission prompts (permission prompts need the plugin) |
-| Codex CLI | `~/.codex/sessions` | Questions |
+| Codex CLI | `~/.codex/sessions` | Questions and approval prompts (approval prompts need the plugin) |
 | Gemini CLI | `~/.gemini/tmp` | Questions |
 | Kiro | `~/.kiro/sessions` | Questions and permission prompts |
 | Cursor | Planned ([#11](https://github.com/JohnCarl-30/brb/issues/11)) | |
@@ -139,9 +139,26 @@ Catch-up from brb (status of other sessions in this project; information, not in
 • The user has uncommitted edits in src/cart.ts, src/routes/auth.ts. Don't overwrite them.
 ```
 
+## Codex plugin
+
+```
+codex plugin marketplace add JohnCarl-30/brb
+codex plugin add brb@brb
+```
+
+Then open Codex, run `/hooks`, and trust brb's two hooks. Codex skips a plugin's hooks until you have reviewed them, and asks again whenever an update changes them.
+
+The plugin adds the same three things as the Claude Code one:
+
+- A SessionStart hook that briefs every new or resumed Codex session on the other sessions in the same project.
+- A PermissionRequest hook that marks a Codex session waiting on you the moment it asks for approval, with the command it wants to run. It only records the request; you still approve or deny it in Codex.
+- A `brb` skill, so asking Codex to "run brb" prints the catch-up.
+
+It needs Node 20 or newer on your PATH. To update, run `codex plugin marketplace upgrade brb` and then `codex plugin add brb@brb`.
+
 ## Other agents
 
-Codex and Gemini CLI users can give their agent the same briefing. Add a line like this to `AGENTS.md` or `GEMINI.md`:
+Gemini CLI users, and Codex users without the plugin, can give their agent the same briefing. Add a line like this to `GEMINI.md` or `AGENTS.md`:
 
 ```
 Run `npx @john_carl/brb --brief` before starting a task.
@@ -182,8 +199,8 @@ brb never writes to your tools' history files. It writes only these:
 - `~/.brb/cache/summaries.json`, the summary cache.
 - `~/.brb/cache/recaps.json`, the recap cache.
 - `~/.brb/recaps/`, one recap page per session you open with `brb show`, deleted after 7 days.
-- `~/.brb/pending/`, one small file per Claude session blocked on a permission prompt (plugin only).
-- `~/.brb/hooks-on`, an empty file that says the plugin's hooks have run (plugin only).
+- `~/.brb/pending/`, one small file per Claude or Codex session blocked on a permission prompt (plugins only).
+- `~/.brb/hooks-on`, an empty file that says the Claude Code plugin's hooks have run (plugin only).
 - `~/.brb/seen.json`, when you last picked each session.
 - `brb-summaries/` in your temp folder, where summary and recap prompts run.
 
