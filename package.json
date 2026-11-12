@@ -1,6 +1,6 @@
 {
   "name": "@john_carl/brb",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Step away from your AI coding sessions. When you're back, brb shows you everything that moved in one screen.",
   "type": "module",
   "bin": {
