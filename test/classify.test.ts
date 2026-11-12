@@ -177,6 +177,8 @@ test('a partly read turn still waits on a structured ask', () => {
 
 test('a tool call with no result yet is working past the quiet minute, then idle after 10 minutes', () => {
   const pending = (at: number): Session => ({ ...s([user(min(20)), agent(at, 'Running the suite.')]), pendingTool: { at, label: 'npm test' } });
-  expect(classify(pending(min(5)), NOW)).toEqual({ status: 'working', detail: 'npm test · no result for 5 min', longText: 'Running the suite.' });
+  expect(classify(pending(min(5)), NOW)).toEqual({ status: 'working', detail: 'npm test · no result for 5 min', longText: 'Running the suite.', maybeBlocked: true });
+  // Only that case: a session that wrote something in the last minute is plainly working.
+  expect(classify(pending(min(0.5)), NOW).maybeBlocked).toBeUndefined();
   expect(classify(pending(min(10)), NOW)).toMatchObject({ status: 'idle', detail: 'no activity for 10 min' });
 });

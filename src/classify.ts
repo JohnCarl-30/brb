@@ -45,7 +45,7 @@ export function classify(s: Session, now: number, permission?: PermissionRequest
     // tell), so the detail says what is known, not "running".
     const waited = s.pendingTool ? now - s.pendingTool.at : Infinity;
     return waited < PENDING_TOOL_MS
-      ? { status: 'working', detail: `${s.pendingTool!.label} · no result for ${formatAge(waited)}`, longText: said }
+      ? { status: 'working', detail: `${s.pendingTool!.label} · no result for ${formatAge(waited)}`, longText: said, maybeBlocked: true }
       : { status: 'idle', detail: `no activity for ${formatAge(quietFor)}`, longText: said };
   }
 

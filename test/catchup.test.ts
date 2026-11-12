@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, expect, test } from 'vitest';
-import { agentEditedFiles, buildCatchUp, type CatchUp, type CatchUpInput } from '../src/catchup';
+import { agentEditedFiles, buildCatchUp, HOOK_HINT, type CatchUp, type CatchUpInput } from '../src/catchup';
 import type { Change } from '../src/git';
 import type { Session, SessionEvent } from '../src/types';
 
@@ -235,4 +235,23 @@ test('a pasted wall of text is cut to 300 characters', () => {
   const wall = twoPrompts();
   wall.events[3] = prompt(20, 'x'.repeat(5_000));
   expect(askedOf(wall)).toHaveLength(300);
+});
+
+// A Claude tool call with no result for 5 minutes: a long command, or a permission prompt nobody can see without the hooks.
+const quietCall = session({ id: 'quiet', tool: 'claude', cwd: SHOP, events: [user(20), agent(5, 'Running the suite.')], pendingTool: { at: min(5), label: 'npm test' } });
+
+test('points to the plugin when a quiet tool call may be a permission prompt and the hooks have never run', () => {
+  expect(buildCatchUp(input({ sessions: [quietCall], hooksOff: true })).hint).toBe(HOOK_HINT);
+});
+
+test('no plugin tip once the hooks have run, or when no row could be a hidden prompt', () => {
+  expect(buildCatchUp(input({ sessions: [quietCall], hooksOff: false })).hint).toBeUndefined();
+  expect(buildCatchUp(input({ hooksOff: true })).hint).toBeUndefined();
+  expect(buildCatchUp(input({ sessions: [quietCall], hooksOff: true, excludeSessionId: 'quiet' })).hint).toBeUndefined();
+});
+
+test('a session whose only move since your prompt is a tool call still running is listed', () => {
+  const straightToWork = session({ id: 'busy', tool: 'claude', cwd: SHOP, events: [user(6)], pendingTool: { at: min(5), label: 'npm test' } });
+  const c = buildCatchUp(input({ sessions: [straightToWork] }));
+  expect(c.here?.rows[0]).toMatchObject({ sessionId: 'busy', status: 'working', detail: 'npm test · no result for 5 min' });
 });

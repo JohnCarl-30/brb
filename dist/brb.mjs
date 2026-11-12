@@ -759,7 +759,7 @@ function classify(s, now, permission) {
     const quietFor = now - s.lastActivityAt;
     if (quietFor < WORKING_WITHIN_MS) return { status: "working", detail: firstSentence(said) || "working\u2026", longText: said };
     const waited = s.pendingTool ? now - s.pendingTool.at : Infinity;
-    return waited < PENDING_TOOL_MS ? { status: "working", detail: `${s.pendingTool.label} \xB7 no result for ${formatAge(waited)}`, longText: said } : { status: "idle", detail: `no activity for ${formatAge(quietFor)}`, longText: said };
+    return waited < PENDING_TOOL_MS ? { status: "working", detail: `${s.pendingTool.label} \xB7 no result for ${formatAge(waited)}`, longText: said, maybeBlocked: true } : { status: "idle", detail: `no activity for ${formatAge(quietFor)}`, longText: said };
   }
   const lastCommand = ofKind(turn, "command").at(-1);
   if (lastCommand && !lastCommand.ok) {
@@ -854,6 +854,7 @@ var FIRST_RUN_MS = 8 * 60 * 6e4;
 var MAX_FILES = 5;
 var MAX_NEXT = 3;
 var ASKED_MAX = 300;
+var HOOK_HINT = "tip: a quiet Claude tool call can be a permission prompt. The brb plugin shows those as waiting: github.com/JohnCarl-30/brb#claude-code-plugin";
 var ORDER = ["waiting", "finished", "failed", "working", "idle"];
 var quote = (s) => /^[A-Za-z0-9._/~@+-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`;
 var quotePath = (p) => p.startsWith("~/") ? `~/${quote(p.slice(2))}` : quote(p);
@@ -900,11 +901,14 @@ function buildCatchUp(input) {
   const awayMs = input.sinceMs !== void 0 || seenHere === void 0 ? null : now - seenHere;
   const hereFolders = new Set([input.cwd, ...git2 ? [git2.root] : []].map(realpath));
   const resumeFor = (s) => (hereFolders.has(realpath(s.cwd)) ? "" : `cd ${quotePath(tilde(s.cwd, home))} && `) + RESUME[s.tool](s.id);
+  let maybeBlocked = false;
   const rows = sessions.flatMap((s) => {
     const project = projectFor(s.cwd);
     const verdict = classify(s, now, input.permissions.get(s.id));
     const pickedAt = input.sinceMs === void 0 ? input.seen?.get(seenKey(s.tool, s.id)) ?? -Infinity : -Infinity;
-    if (verdict.status !== "waiting" && s.lastActivityAt <= Math.max(windowStart(project.key), pickedAt)) return [];
+    const movedAt = Math.max(s.lastActivityAt, s.pendingTool?.at ?? -Infinity);
+    if (verdict.status !== "waiting" && movedAt <= Math.max(windowStart(project.key), pickedAt)) return [];
+    maybeBlocked ||= verdict.maybeBlocked === true;
     return [{
       tool: s.tool,
       sessionId: s.id,
@@ -933,7 +937,8 @@ function buildCatchUp(input) {
     ...hereRows.filter((r) => r.status === "finished" && r.branch !== void 0 && branch !== null && r.branch !== branch).map((r) => ({ label: `review "${oneLine(r.title, 24)}"`, command: `git diff ${quote(branch)}...${quote(r.branch)}` })),
     ...you?.todos[0] ? [{ label: "pick up your TODO", command: `${you.todos[0].file}:${you.todos[0].line}` }] : []
   ].slice(0, MAX_NEXT);
-  return { now, awayMs, warnings: input.warnings, sessions: sessions.length, here, elsewhere, next };
+  const hint = maybeBlocked && input.hooksOff ? HOOK_HINT : void 0;
+  return { now, awayMs, warnings: input.warnings, hint, sessions: sessions.length, here, elsewhere, next };
 }
 
 // src/git.ts
@@ -1056,6 +1061,13 @@ function addedTodos(root, files) {
 import * as fs4 from "fs";
 import * as path6 from "path";
 var MARKER = /^claude-([\w-]+)\.json$/;
+var hooksMarker = (brbHome) => path6.join(brbHome, "hooks-on");
+var hooksHaveRun = (brbHome) => fs4.existsSync(hooksMarker(brbHome));
+function recordHookRun(brbHome) {
+  if (hooksHaveRun(brbHome)) return;
+  fs4.mkdirSync(brbHome, { recursive: true, mode: 448 });
+  fs4.writeFileSync(hooksMarker(brbHome), "", { mode: 384 });
+}
 function recordPermissionRequest(brbHome, sessionId, message, now) {
   if (!/^[\w-]+$/.test(sessionId)) return;
   const dir = path6.join(brbHome, "pending");
@@ -1106,6 +1118,7 @@ async function computeCatchUp(o) {
     sessions,
     permissions: readPermissionRequests(roots.brb, o.now),
     seen: readSeen(roots.brb),
+    hooksOff: !hooksHaveRun(roots.brb),
     git: git2,
     excludeSessionId: o.excludeSessionId,
     sinceMs: o.sinceMs,
@@ -1190,6 +1203,7 @@ function renderTerminal(c, o) {
   }
   if (numbered && rows > 0) footer.push(k.dim(" brb <number> picks that session back up \xB7 brb show <number> opens its recap"));
   if (footer.length > 0) sections.push(footer);
+  if (c.hint) sections.push([k.dim(` ${oneLine(c.hint, LONG)}`)]);
   if (c.warnings.length > 0) sections.push(c.warnings.map((w) => k.yellow(` ! ${oneLine(w, LONG)}`)));
   return sections.map((lines) => lines.join("\n")).join("\n\n") + "\n";
 }
@@ -1237,6 +1251,7 @@ var QUIET = { stdout: "", exitCode: 0 };
 async function runHook(name, stdin, o) {
   if (o.env.BRB_INTERNAL === "1") return QUIET;
   try {
+    if (name === "notification" || name === "session-start") recordHookRun(resolveRoots(o.env).brb);
     const input = JSON.parse(stdin) ?? {};
     const sessionId = typeof input.session_id === "string" ? input.session_id : void 0;
     if (name === "notification") {

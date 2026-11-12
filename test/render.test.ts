@@ -249,3 +249,12 @@ test('the asked line is cleaned and cut to the terminal width like any session t
   expect(line.length).toBeLessThanOrEqual(60);
   expect(line).not.toMatch(/[\x00-\x1f\x7f]/);
 });
+
+test('a tip prints as its own last line in the terminal, and not in the brief or the count', () => {
+  const c = scenarioCatchUp();
+  c.hint = 'tip: try \x1b[2Jthe plugin';
+  expect(renderTerminal(c, plain).endsWith('\n\n tip: try the plugin\n')).toBe(true);
+  expect(renderBrief(c)).not.toContain('tip:');
+  expect(renderCount(c)).not.toContain('tip');
+  expect(renderTerminal(scenarioCatchUp(), plain)).not.toContain('tip:');
+});

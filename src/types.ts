@@ -21,4 +21,5 @@ export interface Session {
   file?: string;           // the history file it was read from
 }
 export interface PermissionRequest { at: number; message: string }
-export interface Verdict { status: Status; detail: string; longText: string }
+// `maybeBlocked`: working only because a tool call has had no result, which is also what a permission prompt looks like.
+export interface Verdict { status: Status; detail: string; longText: string; maybeBlocked?: boolean }

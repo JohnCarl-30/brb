@@ -95,6 +95,8 @@ export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number;
   if (numbered && rows > 0) footer.push(k.dim(' brb <number> picks that session back up · brb show <number> opens its recap'));
   if (footer.length > 0) sections.push(footer);
 
+  if (c.hint) sections.push([k.dim(` ${oneLine(c.hint, LONG)}`)]);
+
   if (c.warnings.length > 0) sections.push(c.warnings.map((w) => k.yellow(` ! ${oneLine(w, LONG)}`)));
 
   return sections.map((lines) => lines.join('\n')).join('\n\n') + '\n';

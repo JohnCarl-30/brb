@@ -41,7 +41,7 @@ Run it inside a project to see that project first. Run it anywhere else to see e
  → answer Claude                  claude --resume 8f2c1d9e-0000-4000-8000-000000000001
  → see what broke                 codex resume 019a0000-0000-7000-8000-000000000003
  → review "add login rate limit"  git diff main...login-rate-limit
- brb <number> picks that session back up
+ brb <number> picks that session back up · brb show <number> opens its recap
 ```
 
 - **Waiting on you.** A session stopped on a question, a plan to approve or a permission prompt. brb shows what it asked.
@@ -60,7 +60,7 @@ Sessions in the project you are standing in come first. Other projects follow, o
 | `◐` | waiting on you | The session asked a question, has a plan for you to approve, is blocked on a permission prompt, or ended its turn by asking you something without doing any work. A waiting session stays on the list however old it is. |
 | `●` | finished | The session ended its turn, and its last command, if it ran one, passed. |
 | `✕` | stopped | The last thing in the turn was an error or an interruption, or the last command failed, such as a test run or a build. |
-| `◌` | working | The turn hasn't ended and the session wrote something in the last minute, or a Claude tool call (a long test run, say) has had no result for under 10 minutes. Without the plugin's hooks that can also be a permission prompt. |
+| `◌` | working | The turn hasn't ended and the session wrote something in the last minute, or a Claude tool call (a long test run, say) has had no result for under 10 minutes. Without the [plugin](#claude-code-plugin)'s hooks that can also be a permission prompt, and brb adds a one-line tip saying so. |
 | `○` | idle | The turn hasn't ended but nothing has happened for a minute or more and no tool call is still out, such as a session you closed mid-answer. |
 | `✎` | You | Files changed in your working tree that no AI session's edit tools touched, plus any `TODO` or `FIXME` you added in them. |
 
@@ -69,7 +69,7 @@ Sessions in the project you are standing in come first. Other projects follow, o
 Every session row has a number. In a terminal, brb asks which one you want right after the list:
 
 ```
- Pick a session (1-4), Enter to quit: 3
+ Pick a session (1-4), s<n> for its recap, Enter to quit: 3
  → codex resume 019a0000-0000-7000-8000-000000000003
 ```
 
@@ -106,7 +106,7 @@ Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus C
 | Codex CLI | `~/.codex/sessions` | Questions |
 | Gemini CLI | `~/.gemini/tmp` | Questions |
 | Kiro | `~/.kiro/sessions` | Questions and permission prompts |
-| Cursor | Coming in v1.1 | |
+| Cursor | Planned ([#11](https://github.com/JohnCarl-30/brb/issues/11)) | |
 
 If you moved a tool's folder, brb follows the same variable the tool does: `CLAUDE_CONFIG_DIR` for Claude Code and `CODEX_HOME` for Codex. Gemini CLI and Kiro have no such variable, so brb always reads `~/.gemini` and `~/.kiro`.
 
@@ -122,7 +122,7 @@ brb leaves out sessions that background agents run by themselves: its own summar
 The plugin adds three things:
 
 - A SessionStart hook that briefs every new Claude session on the other sessions in the same project, so it knows about parallel work and doesn't overwrite your edits. It prints at most 10 lines and nothing when there is nothing to say.
-- A Notification hook that marks a session blocked on a permission prompt as waiting on you.
+- A Notification hook that marks a session blocked on a permission prompt as waiting on you. Without it, a blocked session looks the same as one running a long command.
 - `/brb`, which prints the catch-up inside Claude Code.
 
 It needs Node 20 or newer on your PATH.
@@ -183,6 +183,8 @@ brb never writes to your tools' history files. It writes only these:
 - `~/.brb/cache/recaps.json`, the recap cache.
 - `~/.brb/recaps/`, one recap page per session you open with `brb show`, deleted after 7 days.
 - `~/.brb/pending/`, one small file per Claude session blocked on a permission prompt (plugin only).
+- `~/.brb/hooks-on`, an empty file that says the plugin's hooks have run (plugin only).
+- `~/.brb/seen.json`, when you last picked each session.
 - `brb-summaries/` in your temp folder, where summary and recap prompts run.
 
 Session text that brb prints has terminal control codes stripped, so a session can't rewrite your screen.
@@ -258,7 +260,7 @@ brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key
 }
 ```
 
-`status` is one of `waiting`, `finished`, `failed`, `working` or `idle`. A row also has `asked`, your latest prompt, when the session has more than one prompt from you. `here` is `null` when nothing in the project you're in moved and you have no edits of your own. `you` is `null` when you have no uncommitted edits.
+`status` is one of `waiting`, `finished`, `failed`, `working` or `idle`. A row also has `asked`, your latest prompt, when the session has more than one prompt from you. `hint` is a one-line tip, present only when brb has one. `here` is `null` when nothing in the project you're in moved and you have no edits of your own. `you` is `null` when you have no uncommitted edits.
 
 ## How it works
 
@@ -294,7 +296,7 @@ npm run typecheck
 npm run build       # bundles dist/brb.mjs
 ```
 
-The plugin runs `dist/brb.mjs` straight from the repo, so it is committed. `npm ci` sets up a pre-commit hook that rebuilds it with every commit, and CI fails on a stale one. Tests run against a made-up home folder and never read your real sessions. `npm run demo:seed` builds the demo world used for the GIF.
+The plugin runs `dist/brb.mjs` straight from the repo, so it is committed. `npm ci` sets up a pre-commit hook that rebuilds it with every commit, and CI fails on a stale one. Tests run against a made-up home folder and never read your real sessions. `npm run demo:seed` builds the demo world used for the GIF, and `vhs demo/demo.tape` records it (it needs [VHS](https://github.com/charmbracelet/vhs)).
 
 ## License
 

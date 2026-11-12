@@ -2,6 +2,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
+import { HOOK_HINT } from '../src/catchup';
+import { run } from '../src/cli';
 import { runHook } from '../src/hooks';
 import { readPermissionRequests } from '../src/pending';
 import { cl, writeClaudeSession } from './support/fake-home';
@@ -83,4 +85,24 @@ test("hooks stay quiet inside brb's own AI calls", async () => {
   expect(await hook('session-start', stdin, world.home, { BRB_INTERNAL: '1' })).toEqual({ stdout: '', exitCode: 0 });
   expect(await hook('notification', stdin, world.home, { BRB_INTERNAL: '1' })).toEqual({ stdout: '', exitCode: 0 });
   expect(readPermissionRequests(path.join(world.home, '.brb'), NOW).size).toBe(0);
+});
+
+// brb can only see a permission prompt through the hooks, so it tips the plugin until a hook has run once.
+test('the plugin tip shows for a quiet Claude tool call until any hook has run', async () => {
+  const w = seedScenario(path.join(tmp, 'tip'), NOW);
+  const h = { home: w.home, claude: path.join(w.home, '.claude'), codex: path.join(w.home, '.codex'), gemini: path.join(w.home, '.gemini'), kiro: path.join(w.home, '.kiro'), brb: path.join(w.home, '.brb') };
+  const min = (m: number) => NOW - m * 60_000;
+  const list = async () => (await run({ argv: [], env: { HOME: w.home }, cwd: w.repo, now: NOW, isTTY: false })).stdout;
+
+  expect(await list()).not.toContain('tip:'); // nothing could be a hidden prompt yet
+  writeClaudeSession(h, { id: 'suite', cwd: w.repo, branch: 'main', lines: [cl.user('run the suite', min(6)), cl.tool('t1', 'Bash', { command: 'npm test' }, min(5))] });
+  expect(await list()).toContain(`\n ${HOOK_HINT}\n`);
+
+  await hook('session-start', 'not json', w.home, { BRB_INTERNAL: '1' }); // brb's own AI runs don't count
+  await hook('stop', '{}', w.home);                                       // nor a hook brb doesn't have
+  expect(await list()).toContain('tip:');
+
+  await hook('session-start', 'not json', w.home); // even a run that fails on its input shows the hooks are installed
+  expect(await list()).not.toContain('tip:');
+  if (process.platform !== 'win32') expect(fs.statSync(path.join(h.brb, 'hooks-on')).mode & 0o777).toBe(0o600);
 });
