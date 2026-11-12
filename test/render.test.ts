@@ -229,3 +229,23 @@ test('the count holds nothing from a session: digits, the four words and separat
   for (const r of [...c.here!.rows, ...c.elsewhere]) Object.assign(r, { title: '\x1b[2J evil', detail: '\x1b]0;x\x07', summary: '\n\r' });
   expect(renderCount(c)).toMatch(/^\d+ (waiting|stopped|finished|working)( · \d+ (waiting|stopped|finished|working))*$/);
 });
+
+test('shows what you last asked above the detail, wherever the detail shows', () => {
+  const c = scenarioCatchUp();
+  c.here!.rows[1].asked = 'now add a test for negative totals';
+  c.elsewhere[0].asked = 'also fix the Atom feed';
+  const lines = renderTerminal(c, plain).split('\n');
+  const done = lines.findIndex((l) => l.includes('add login rate limit'));
+  expect(lines.slice(done + 1, done + 3)).toEqual(['             you asked: now add a test for negative totals', '             Added 6 tests, all passing.']);
+  expect(lines.filter((l) => l.includes('you asked:'))).toHaveLength(1); // ELSEWHERE is one line a row without --all
+  expect(renderTerminal(c, { ...plain, all: true })).toContain('             you asked: also fix the Atom feed\n             Fixed the RSS dates to use UTC.\n');
+});
+
+test('the asked line is cleaned and cut to the terminal width like any session text', () => {
+  const c = scenarioCatchUp();
+  c.here!.rows[0].asked = `\x1b[2J\x1b]0;x\x07go\r\n${'on '.repeat(200)}`;
+  const line = renderTerminal(c, { ...plain, columns: 60 }).split('\n').find((l) => l.includes('you asked:'))!;
+  expect(line).toMatch(/^ {13}you asked: go on on .*…$/);
+  expect(line.length).toBeLessThanOrEqual(60);
+  expect(line).not.toMatch(/[\x00-\x1f\x7f]/);
+});

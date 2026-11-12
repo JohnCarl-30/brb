@@ -203,3 +203,36 @@ test('--since shows picked sessions again', () => {
 test('a picked session still counts as a session brb found', () => {
   expect(buildCatchUp(input({ seen: seenAt(5) })).sessions).toBe(4);
 });
+
+const prompt = (m: number, text: string): SessionEvent => ({ kind: 'user', at: min(m), text });
+const askedOf = (s: Session) => buildCatchUp(input({ sessions: [s], sinceMs: 7_200_000 })).here?.rows[0].asked;
+const twoPrompts = (over: Partial<Session> = {}) => session({
+  id: 'long', tool: 'claude', cwd: SHOP, title: 'fix checkout rounding',
+  events: [prompt(50, 'fix checkout rounding'), agent(40, 'Done.'), turnEnd(40), prompt(20, 'now add a test\nfor negative totals'), agent(10, 'Added.'), turnEnd(10)], ...over,
+});
+
+test('a row carries your latest prompt as one line when the session has more than one', () => {
+  expect(askedOf(twoPrompts())).toBe('now add a test for negative totals');
+});
+
+test('a session with one prompt has no asked line: the title already says it', () => {
+  expect(buildCatchUp(input()).here?.rows.map((r) => r.asked)).toEqual([undefined, undefined, undefined]);
+});
+
+test('no asked line when the latest prompt repeats the title or says nothing', () => {
+  const again = twoPrompts();
+  again.events[3] = prompt(20, 'fix checkout rounding');
+  expect(askedOf(again)).toBeUndefined();
+  again.events[3] = prompt(20, ' \n ');
+  expect(askedOf(again)).toBeUndefined();
+});
+
+test('no asked line when part of the last turn was skipped, since its prompt was not read', () => {
+  expect(askedOf(twoPrompts({ partialTurn: true }))).toBeUndefined();
+});
+
+test('a pasted wall of text is cut to 300 characters', () => {
+  const wall = twoPrompts();
+  wall.events[3] = prompt(20, 'x'.repeat(5_000));
+  expect(askedOf(wall)).toHaveLength(300);
+});

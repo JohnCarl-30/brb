@@ -49,6 +49,7 @@ export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number;
     const paint = tint[r.status];
     const n = numbered ? `${k.dim(String(++number).padStart(numberWidth))} ` : '';
     const lines = [` ${n}${paint(MARK[r.status])} ${TOOL_NAME[r.tool].padEnd(7)} ${oneLine(title, TITLE_WIDTH).padEnd(TITLE_WIDTH)} ${paint(LABEL[r.status](formatAge(c.now - r.at)))}`];
+    if (withDetail && r.asked) lines.push(DETAIL_INDENT + k.dim(oneLine(`you asked: ${r.asked}`, detailWidth)));
     if (withDetail) lines.push(DETAIL_INDENT + k.dim(oneLine(r.summary ?? r.detail, detailWidth)));
     if (o.all) lines.push(DETAIL_INDENT + k.dim(`→ ${commandText(r.resume)}`));
     return lines;

@@ -48,6 +48,7 @@ Run it inside a project to see that project first. Run it anywhere else to see e
 - **Finished.** A session that did its work, with the last thing it said.
 - **Stopped.** A session that hit an error, was interrupted, or whose last test or build failed. brb shows the error.
 - **Your own edits.** Uncommitted changes that no AI session made, plus any TODO you added.
+- **What you last asked.** In a session with more than one prompt from you, a `you asked: …` line shows the latest, so you know what the answer is to.
 - **The way back in.** Every session is numbered. Type a number at the prompt, or run `brb 2`, and you're back in session 2, in its own folder and its own CLI. A footer also lists up to three next steps, each with the exact command, such as `claude --resume <id>` or `codex resume <id>`. `--all` adds a resume command under every session.
 
 Sessions in the project you are standing in come first. Other projects follow, one line each: every session that needs you or is still working, then the newest of the rest, up to 10 rows. A last line says how many it left out, and `--all` shows them all.
@@ -257,7 +258,7 @@ brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key
 }
 ```
 
-`status` is one of `waiting`, `finished`, `failed`, `working` or `idle`. `here` is `null` when nothing in the project you're in moved and you have no edits of your own. `you` is `null` when you have no uncommitted edits.
+`status` is one of `waiting`, `finished`, `failed`, `working` or `idle`. A row also has `asked`, your latest prompt, when the session has more than one prompt from you. `here` is `null` when nothing in the project you're in moved and you have no edits of your own. `you` is `null` when you have no uncommitted edits.
 
 ## How it works
 

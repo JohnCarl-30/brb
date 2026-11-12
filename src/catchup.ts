@@ -8,6 +8,7 @@ import type { PermissionRequest, Session, Status, Tool } from './types';
 
 export interface Row {
   tool: Tool; sessionId: string; title: string; status: Status; detail: string; summary?: string;
+  asked?: string;    // your latest prompt, when the title doesn't already say it
   at: number; project: Project; cwd: string; branch?: string;
   files: string[];   // files this session edited, relative to its cwd (else absolute with ~), ≤ 5
   resume: string;    // exact command to jump back in
@@ -36,6 +37,7 @@ export const TOOL_NAME: Record<Tool, string> = { claude: 'Claude', codex: 'Codex
 const FIRST_RUN_MS = 8 * 60 * 60_000;
 const MAX_FILES = 5;
 const MAX_NEXT = 3;
+const ASKED_MAX = 300;
 const ORDER: Status[] = ['waiting', 'finished', 'failed', 'working', 'idle'];
 // Session text ends up in commands people paste into a shell: quote what isn't plainly safe. A leading ~/ stays outside the quotes so it still expands.
 const quote = (s: string): string => (/^[A-Za-z0-9._/~@+-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
@@ -57,6 +59,15 @@ function editedFiles(s: Session, home: string): string[] {
   return [...new Set(newestFirst)]
     .slice(0, MAX_FILES)
     .map((file) => (inside(s.cwd, file) ? file.slice(s.cwd.length + 1) : tilde(file, home)));
+}
+
+// Your latest prompt, cut to one line. Nothing for a session with one prompt: its title already says what you asked.
+// Nothing either when the reader skipped part of the last turn, since the prompt that started it wasn't read.
+function latestAsk(s: Session): string | undefined {
+  if (s.partialTurn) return undefined;
+  const prompts = s.events.filter((e) => e.kind === 'user');
+  const asked = prompts.length > 1 ? oneLine(prompts.at(-1)!.text, ASKED_MAX) : '';
+  return asked === '' || asked === s.title ? undefined : asked;
 }
 
 // Real paths, so they match the files git reports even through a symlinked folder.
@@ -100,7 +111,7 @@ export function buildCatchUp(input: CatchUpInput): CatchUp {
       const pickedAt = input.sinceMs === undefined ? (input.seen?.get(seenKey(s.tool, s.id)) ?? -Infinity) : -Infinity;
       if (verdict.status !== 'waiting' && s.lastActivityAt <= Math.max(windowStart(project.key), pickedAt)) return [];
       return [{
-        tool: s.tool, sessionId: s.id, title: s.title, status: verdict.status, detail: verdict.detail,
+        tool: s.tool, sessionId: s.id, title: s.title, status: verdict.status, detail: verdict.detail, asked: latestAsk(s),
         at: s.lastActivityAt, project, cwd: s.cwd, branch: s.branch,
         files: editedFiles(s, home), resume: resumeFor(s), longText: verdict.longText, file: s.file,
       }];
