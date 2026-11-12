@@ -853,6 +853,7 @@ var TOOL_NAME = { claude: "Claude", codex: "Codex", gemini: "Gemini", kiro: "Kir
 var FIRST_RUN_MS = 8 * 60 * 6e4;
 var MAX_FILES = 5;
 var MAX_NEXT = 3;
+var ASKED_MAX = 300;
 var ORDER = ["waiting", "finished", "failed", "working", "idle"];
 var quote = (s) => /^[A-Za-z0-9._/~@+-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`;
 var quotePath = (p) => p.startsWith("~/") ? `~/${quote(p.slice(2))}` : quote(p);
@@ -868,6 +869,12 @@ var tilde = (p, home) => p === home || inside(home, p) ? `~${p.slice(home.length
 function editedFiles(s, home) {
   const newestFirst = [...s.events].reverse().flatMap((e) => e.kind === "edit" ? e.files : []);
   return [...new Set(newestFirst)].slice(0, MAX_FILES).map((file) => inside(s.cwd, file) ? file.slice(s.cwd.length + 1) : tilde(file, home));
+}
+function latestAsk(s) {
+  if (s.partialTurn) return void 0;
+  const prompts = s.events.filter((e) => e.kind === "user");
+  const asked = prompts.length > 1 ? oneLine(prompts.at(-1).text, ASKED_MAX) : "";
+  return asked === "" || asked === s.title ? void 0 : asked;
 }
 function agentEditedFiles(sessions, projectKey) {
   const files = /* @__PURE__ */ new Set();
@@ -904,6 +911,7 @@ function buildCatchUp(input) {
       title: s.title,
       status: verdict.status,
       detail: verdict.detail,
+      asked: latestAsk(s),
       at: s.lastActivityAt,
       project,
       cwd: s.cwd,
@@ -1142,6 +1150,7 @@ function renderTerminal(c, o) {
     const paint = tint[r.status];
     const n = numbered ? `${k.dim(String(++number).padStart(numberWidth))} ` : "";
     const lines = [` ${n}${paint(MARK[r.status])} ${TOOL_NAME[r.tool].padEnd(7)} ${oneLine(title, TITLE_WIDTH).padEnd(TITLE_WIDTH)} ${paint(LABEL[r.status](formatAge(c.now - r.at)))}`];
+    if (withDetail && r.asked) lines.push(DETAIL_INDENT + k.dim(oneLine(`you asked: ${r.asked}`, detailWidth)));
     if (withDetail) lines.push(DETAIL_INDENT + k.dim(oneLine(r.summary ?? r.detail, detailWidth)));
     if (o.all) lines.push(DETAIL_INDENT + k.dim(`\u2192 ${commandText(r.resume)}`));
     return lines;
