@@ -6,6 +6,15 @@ import type { PermissionRequest } from './types';
 // The Notification hook leaves one marker per Claude session that is blocked on a permission prompt.
 const MARKER = /^claude-([\w-]+)\.json$/;
 
+// Left by every hook run, so brb can tell whether the plugin's hooks are installed without reading Claude's settings.
+const hooksMarker = (brbHome: string): string => path.join(brbHome, 'hooks-on');
+export const hooksHaveRun = (brbHome: string): boolean => fs.existsSync(hooksMarker(brbHome));
+export function recordHookRun(brbHome: string): void {
+  if (hooksHaveRun(brbHome)) return;
+  fs.mkdirSync(brbHome, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(hooksMarker(brbHome), '', { mode: 0o600 });
+}
+
 export function recordPermissionRequest(brbHome: string, sessionId: string, message: string, now: number): void {
   if (!/^[\w-]+$/.test(sessionId)) return; // the id comes from hook input and becomes a file name, so it must not hold a path
   const dir = path.join(brbHome, 'pending');

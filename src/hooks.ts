@@ -1,7 +1,7 @@
 import { resolveRoots } from './adapters';
 import type { RunOptions, RunResult } from './cli';
 import { computeCatchUp } from './compute';
-import { recordPermissionRequest } from './pending';
+import { recordHookRun, recordPermissionRequest } from './pending';
 import { renderBrief } from './render';
 import { oneLine } from './text';
 
@@ -11,6 +11,7 @@ const QUIET: RunResult = { stdout: '', exitCode: 0 };
 export async function runHook(name: string, stdin: string, o: RunOptions): Promise<RunResult> {
   if (o.env.BRB_INTERNAL === '1') return QUIET; // brb's own AI calls start Claude sessions that run these hooks too
   try {
+    if (name === 'notification' || name === 'session-start') recordHookRun(resolveRoots(o.env).brb);
     const input = (JSON.parse(stdin) ?? {}) as { session_id?: unknown; cwd?: unknown; message?: unknown; notification_type?: unknown };
     const sessionId = typeof input.session_id === 'string' ? input.session_id : undefined;
 

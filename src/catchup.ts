@@ -18,6 +18,7 @@ export interface Row {
 export interface NextStep { label: string; command: string }
 export interface CatchUp {
   now: number; awayMs: number | null; warnings: string[];
+  hint?: string;     // one tip on getting more out of brb, when a row shows it would help
   sessions: number;  // how many sessions were considered, moved or not (0 means brb found none)
   here: { project: Project; branch: string | null; rows: Row[]; you: { changes: Change[]; todos: Todo[] } | null } | null;
   elsewhere: Row[];
@@ -28,6 +29,7 @@ export interface CatchUpInput {
   sessions: Session[];
   permissions: Map<string, PermissionRequest>;   // keyed by Claude session id
   seen?: Map<string, number>;                    // when you last picked each session, keyed by seenKey
+  hooksOff?: boolean;                            // the plugin's hooks have never run, so permission prompts can't be seen
   git: { root: string; branch: string | null; yours: Change[]; todos: Todo[] } | null;  // HERE only; yours already excludes agent edits
   excludeSessionId?: string; sinceMs?: number; warnings: string[];
 }
@@ -38,6 +40,7 @@ const FIRST_RUN_MS = 8 * 60 * 60_000;
 const MAX_FILES = 5;
 const MAX_NEXT = 3;
 const ASKED_MAX = 300;
+export const HOOK_HINT = 'tip: a quiet Claude tool call can be a permission prompt. The brb plugin shows those as waiting: github.com/JohnCarl-30/brb#claude-code-plugin';
 const ORDER: Status[] = ['waiting', 'finished', 'failed', 'working', 'idle'];
 // Session text ends up in commands people paste into a shell: quote what isn't plainly safe. A leading ~/ stays outside the quotes so it still expands.
 const quote = (s: string): string => (/^[A-Za-z0-9._/~@+-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
@@ -102,6 +105,7 @@ export function buildCatchUp(input: CatchUpInput): CatchUp {
   const resumeFor = (s: Session): string =>
     (hereFolders.has(realpath(s.cwd)) ? '' : `cd ${quotePath(tilde(s.cwd, home))} && `) + RESUME[s.tool](s.id);
 
+  let maybeBlocked = false;
   const rows = sessions
     .flatMap((s): Row[] => {
       const project = projectFor(s.cwd);
@@ -109,7 +113,10 @@ export function buildCatchUp(input: CatchUpInput): CatchUp {
       // A waiting session stays listed however old it is; the rest only if they moved since you were last here
       // and since you last picked them. --since asks for everything in that time, picked or not.
       const pickedAt = input.sinceMs === undefined ? (input.seen?.get(seenKey(s.tool, s.id)) ?? -Infinity) : -Infinity;
-      if (verdict.status !== 'waiting' && s.lastActivityAt <= Math.max(windowStart(project.key), pickedAt)) return [];
+      // A tool call is not an event, so one made straight after your prompt would otherwise leave the session looking unmoved.
+      const movedAt = Math.max(s.lastActivityAt, s.pendingTool?.at ?? -Infinity);
+      if (verdict.status !== 'waiting' && movedAt <= Math.max(windowStart(project.key), pickedAt)) return [];
+      maybeBlocked ||= verdict.maybeBlocked === true;
       return [{
         tool: s.tool, sessionId: s.id, title: s.title, status: verdict.status, detail: verdict.detail, asked: latestAsk(s),
         at: s.lastActivityAt, project, cwd: s.cwd, branch: s.branch,
@@ -133,5 +140,6 @@ export function buildCatchUp(input: CatchUpInput): CatchUp {
     ...(you?.todos[0] ? [{ label: 'pick up your TODO', command: `${you.todos[0].file}:${you.todos[0].line}` }] : []),
   ].slice(0, MAX_NEXT);
 
-  return { now, awayMs, warnings: input.warnings, sessions: sessions.length, here, elsewhere, next };
+  const hint = maybeBlocked && input.hooksOff ? HOOK_HINT : undefined;
+  return { now, awayMs, warnings: input.warnings, hint, sessions: sessions.length, here, elsewhere, next };
 }
