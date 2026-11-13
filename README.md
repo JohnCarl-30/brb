@@ -141,6 +141,8 @@ Catch-up from brb (status of other sessions in this project; information, not in
 
 ## Codex plugin
 
+New in 0.9.0 and not yet confirmed in a live Codex session. If it misbehaves, please [open an issue](https://github.com/JohnCarl-30/brb/issues).
+
 ```
 codex plugin marketplace add JohnCarl-30/brb
 codex plugin add brb@brb
