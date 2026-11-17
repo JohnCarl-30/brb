@@ -713,6 +713,70 @@ function readSessionFile(tool, file, cwd) {
 import * as os2 from "os";
 import * as path7 from "path";
 
+// src/board.ts
+var LIMIT = 5;
+var TIMEOUT_MS = 3e3;
+var LOOPBACK = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]"]);
+function boardConfig(env) {
+  const api = env.OPENCRAWL_API_URL?.trim();
+  const token = env.OPENCRAWL_TOKEN?.trim();
+  if (!api || !token) return null;
+  let url;
+  try {
+    url = new URL(api);
+  } catch {
+    return { error: "OPENCRAWL_API_URL is not a URL" };
+  }
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK.has(url.hostname))) {
+    return { error: "OPENCRAWL_API_URL must use https (plain http only for localhost)" };
+  }
+  return { api: url.origin, token };
+}
+function rpcResult(contentType, body) {
+  const messages = contentType.includes("text/event-stream") ? body.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => JSON.parse(line.slice(5))) : [JSON.parse(body)];
+  const reply2 = messages.find((m) => m && m.id === 1);
+  if (!reply2) throw new Error("no reply from the board");
+  if (reply2.error) throw new Error(String(reply2.error.message ?? "board error"));
+  return reply2.result;
+}
+function toPost(m) {
+  if (!m || typeof m !== "object") return null;
+  const { id, timestamp, name, topic, text } = m;
+  if (typeof id !== "number" || typeof timestamp !== "number" || typeof topic !== "string" || typeof text !== "string") return null;
+  return { id, at: timestamp, name: typeof name === "string" ? name : "", topic, text };
+}
+async function readBoard(o) {
+  const server = new URL(o.config.api).host;
+  const request = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "board_search", arguments: { query: "", sort: "newest", since: new Date(o.since).toISOString(), limit: LIMIT, facets: [] } }
+  };
+  try {
+    const response = await (o.fetch ?? fetch)(`${o.config.api}/mcp`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${o.config.token}`, "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify(request),
+      redirect: "error",
+      // a redirect would carry the token somewhere else
+      signal: AbortSignal.timeout(o.timeoutMs ?? TIMEOUT_MS)
+    });
+    if (response.status === 401 || response.status === 403) return { warning: `OpenCrawl board: ${server} turned down OPENCRAWL_TOKEN (HTTP ${response.status})` };
+    if (!response.ok) return { warning: `OpenCrawl board: ${server} answered HTTP ${response.status}` };
+    const result = rpcResult(response.headers.get("content-type") ?? "", await response.text());
+    const text = result?.content?.find((c) => c.type === "text")?.text ?? "";
+    if (result?.isError) return { warning: `OpenCrawl board: ${text || "search failed"}` };
+    const data = JSON.parse(text);
+    const posts = (data.messages ?? []).map(toPost).filter((p) => p !== null);
+    return { board: { server, since: o.since, posts, total: typeof data.total === "number" ? data.total : posts.length } };
+  } catch (err) {
+    const cause = err instanceof Error && err.cause instanceof Error ? err.cause : void 0;
+    const reason = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError") ? "no answer in time" : cause ? String(cause.code ?? cause.message) : err instanceof Error ? err.message : String(err);
+    return { warning: `OpenCrawl board: couldn't read ${server} (${reason})` };
+  }
+}
+
 // src/catchup.ts
 import * as path4 from "path";
 
@@ -1108,10 +1172,10 @@ async function computeCatchUp(o) {
   let git2 = null;
   if (snapshot) {
     const agent = agentEditedFiles(sessions, projectFor(o.cwd).key);
-    const yours = snapshot.changes.filter((c) => !agent.has(realpath(path7.resolve(snapshot.root, c.file))));
-    git2 = { root: snapshot.root, branch: snapshot.branch, yours, todos: addedTodos(snapshot.root, yours.map((c) => c.file)) };
+    const yours = snapshot.changes.filter((c2) => !agent.has(realpath(path7.resolve(snapshot.root, c2.file))));
+    git2 = { root: snapshot.root, branch: snapshot.branch, yours, todos: addedTodos(snapshot.root, yours.map((c2) => c2.file)) };
   }
-  return buildCatchUp({
+  const c = buildCatchUp({
     now: o.now,
     cwd: o.cwd,
     home: o.env.HOME ?? os2.homedir(),
@@ -1124,6 +1188,15 @@ async function computeCatchUp(o) {
     sinceMs: o.sinceMs,
     warnings
   });
+  const config = o.board ? boardConfig(o.env) : null;
+  if (config && "error" in config) c.warnings.push(`OpenCrawl board: ${config.error}`);
+  else if (config) {
+    const since = o.sinceMs !== void 0 ? o.now - o.sinceMs : o.now - (c.awayMs ?? FIRST_RUN_MS);
+    const { board, warning } = await readBoard({ config, since, fetch: o.fetch });
+    if (board) c.board = board;
+    if (warning) c.warnings.push(warning);
+  }
+  return c;
 }
 
 // src/render.ts
@@ -1194,6 +1267,16 @@ function renderTerminal(c, o) {
       ...elsewhere.flatMap((r) => sessionLines(r, `${r.project.name} \xB7 ${r.title}`, o.all)),
       ...elsewhere.length < c.elsewhere.length ? [k.dim(`${shift} +${c.elsewhere.length - elsewhere.length} more \xB7 brb --all shows every session`)] : []
     ]);
+  }
+  if (c.board && c.board.posts.length > 0) {
+    const b = c.board;
+    const lines = [k.dim(` BOARD \xB7 ${oneLine(b.server, LONG)}`)];
+    for (const p of b.posts) {
+      lines.push(`${shift} ${k.magenta("#")} ${oneLine(p.topic, 18).padEnd(18)} ${oneLine(p.name || "someone", 24)} ${k.dim(`\xB7 ${formatAge(c.now - p.at)} ago`)}`);
+      lines.push(DETAIL_INDENT + k.dim(oneLine(p.text, detailWidth)));
+    }
+    if (b.total > b.posts.length) lines.push(k.dim(`${shift} +${b.total - b.posts.length} more on the board`));
+    sections.push(lines);
   }
   const footer = [];
   if (c.next.length > 0) {
@@ -1302,7 +1385,7 @@ var PROMPT = "Summarize this AI coding session update for its developer in 8 wor
 var MAX_JOBS = 8;
 var MAX_TEXT = 2e3;
 var MAX_CACHED = 500;
-var TIMEOUT_MS = 2e4;
+var TIMEOUT_MS2 = 2e4;
 var SUMMARY_WIDTH = 60;
 var QUOTES = /^["'`“”‘’]+|["'`“”‘’]+$/g;
 function commandFor(tool, prompt) {
@@ -1357,7 +1440,7 @@ async function summarizeRows(rows, o) {
   await Promise.all(todo.map(async (r) => {
     try {
       const { bin, args } = commandFor(r.tool, PROMPT + r.longText.slice(0, MAX_TEXT));
-      const { code, stdout } = await o.runner(bin, args, { cwd, env, timeoutMs: TIMEOUT_MS });
+      const { code, stdout } = await o.runner(bin, args, { cwd, env, timeoutMs: TIMEOUT_MS2 });
       const line = code === 0 ? reply(stdout) : "";
       if (line !== "") fresh[summaryKey(r)] = line;
     } catch {
@@ -1407,7 +1490,7 @@ var DATA_URL = /^data:(image\/[a-z]+);base64,(.+)$/s;
 var MAX_INPUT = 24e3;
 var MAX_ITEMS = 6;
 var NOTHING = /^(none|n\/a|nothing)\W*$/i;
-var TIMEOUT_MS2 = 9e4;
+var TIMEOUT_MS3 = 9e4;
 var MAX_IMAGE_BYTES = 5e7;
 var KEEP_MS = 7 * 864e5;
 var RECAP_PROMPT = [
@@ -1520,7 +1603,7 @@ async function askRecap(r, s, o) {
   if (!command || !o.which(command.bin) || !privateFolder(cwd)) return null;
   const { bin, args } = command;
   try {
-    const { code, stdout } = await o.runner(bin, args, { cwd, env: { ...o.env, BRB_INTERNAL: "1" }, timeoutMs: TIMEOUT_MS2, signal: o.signal });
+    const { code, stdout } = await o.runner(bin, args, { cwd, env: { ...o.env, BRB_INTERNAL: "1" }, timeoutMs: TIMEOUT_MS3, signal: o.signal });
     const recap = code === 0 ? parseRecap(stdout) : null;
     if (recap) writeCache(file, cache2, { [summaryKey(r)]: stdout });
     return recap;
@@ -1572,6 +1655,7 @@ Usage: brb [options]
   -h, --help       show this help
 
 brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key.
+With OPENCRAWL_API_URL and OPENCRAWL_TOKEN set, it also lists new OpenCrawl board posts.
 `;
 var fail = (message) => ({ stdout: `brb: ${message}
 Run brb --help for usage.
@@ -1615,7 +1699,8 @@ async function run(o) {
     const count = renderCount(await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs, skipGit: true }));
     return { stdout: count === "" ? "" : count + "\n", exitCode: 0 };
   }
-  const c = await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs });
+  const board = pick === void 0 && !values.brief;
+  const c = await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs, board, fetch: o.fetch });
   const listed = [...c.here?.rows ?? [], ...shownElsewhere(c, values.all ?? false)];
   const noAi = values["no-ai"] || o.env.BRB_NO_AI === "1";
   const recap = (n, signal) => writeRecap(listed[n - 1], {

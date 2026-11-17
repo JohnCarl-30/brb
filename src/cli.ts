@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util';
 import pc from 'picocolors';
 import { version } from '../package.json';
 import { resolveRoots } from './adapters';
+import type { Fetch } from './board';
 import { computeCatchUp } from './compute';
 import { runHook } from './hooks';
 import { realpath } from './projects';
@@ -33,10 +34,12 @@ Usage: brb [options]
   -h, --help       show this help
 
 brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key.
+With OPENCRAWL_API_URL and OPENCRAWL_TOKEN set, it also lists new OpenCrawl board posts.
 `;
 
-// `runner`, `which` and `tmpDir` let tests stand in for the AI tools and keep off the real tmp folder; `stdin` is for `brb hook`.
-export interface RunOptions { argv: string[]; env: NodeJS.ProcessEnv; cwd: string; now: number; isTTY: boolean; columns?: number; stdin?: string; runner?: Runner; which?: (bin: string) => boolean; tmpDir?: string }
+// `runner`, `which` and `tmpDir` let tests stand in for the AI tools and keep off the real tmp folder; `fetch` stands in
+// for the OpenCrawl board server; `stdin` is for `brb hook`.
+export interface RunOptions { argv: string[]; env: NodeJS.ProcessEnv; cwd: string; now: number; isTTY: boolean; columns?: number; stdin?: string; runner?: Runner; which?: (bin: string) => boolean; tmpDir?: string; fetch?: Fetch }
 // `pending` is the one line to show while `rerender` works; it is only there when `rerender` is. `exec` is a shell
 // command to hand the terminal to once stdout is written. `choices` are the numbered rows' resume commands, in order,
 // for the "pick a session" question asked at the end in a terminal. `recap` writes listed row n's recap page and gives its
@@ -85,7 +88,9 @@ export async function run(o: RunOptions): Promise<RunResult> {
     return { stdout: count === '' ? '' : count + '\n', exitCode: 0 };
   }
 
-  const c = await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs });
+  // The board is for you, on the full screen or --json: not for picking a row, nor --brief, which goes into an agent's context.
+  const board = pick === undefined && !values.brief;
+  const c = await computeCatchUp({ env: o.env, cwd: o.cwd, now: o.now, excludeSessionId: values.exclude, sinceMs, board, fetch: o.fetch });
   // Numbered in the order the screen shows them: HERE, then ELSEWHERE.
   const listed = [...(c.here?.rows ?? []), ...shownElsewhere(c, values.all ?? false)];
   const noAi = values['no-ai'] || o.env.BRB_NO_AI === '1';
