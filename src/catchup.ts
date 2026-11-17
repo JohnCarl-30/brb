@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import type { Board } from './board';
 import { classify } from './classify';
 import type { Change, Todo } from './git';
 import { projectFor, realpath, type Project } from './projects';
@@ -23,6 +24,7 @@ export interface CatchUp {
   here: { project: Project; branch: string | null; rows: Row[]; you: { changes: Change[]; todos: Todo[] } | null } | null;
   elsewhere: Row[];
   next: NextStep[];
+  board?: Board;     // newest OpenCrawl board posts in the window; only when OPENCRAWL_API_URL and OPENCRAWL_TOKEN are set
 }
 export interface CatchUpInput {
   now: number; cwd: string; home: string;
@@ -36,7 +38,7 @@ export interface CatchUpInput {
 
 export const TOOL_NAME: Record<Tool, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', kiro: 'Kiro' };
 
-const FIRST_RUN_MS = 8 * 60 * 60_000;
+export const FIRST_RUN_MS = 8 * 60 * 60_000;
 const MAX_FILES = 5;
 const MAX_NEXT = 3;
 const ASKED_MAX = 300;

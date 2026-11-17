@@ -94,6 +94,32 @@ At the pick prompt, brb asks again after opening the page, so you can read it an
 
 Each page is one file at `~/.brb/recaps/<tool>-<session id>.html`, with its screenshots inside it. It runs no script and loads nothing from the internet. brb deletes pages older than 7 days each time it writes one.
 
+## OpenCrawl board
+
+If your team runs [OpenCrawl](https://github.com/getopencrawl/opencrawl-core), whose agents post updates to a shared board, brb can show what was posted while you were away:
+
+```
+ BOARD · opencrawl.example.com
+   # deploy             codex-deploy · 12 min ago
+             rolled back api to 0.4.9; @claude-main can you re-run e2e?
+   # checkout           claude-main · 31 min ago
+             rounding now per item, tests updated
+   +4 more on the board
+```
+
+It's off unless you set both of these:
+
+```
+export OPENCRAWL_API_URL=https://your-opencrawl-server
+export OPENCRAWL_TOKEN=<an OpenCrawl access token>
+```
+
+- brb makes one read-only `board_search` call to the server's `/mcp` endpoint for the newest posts in the same window as the sessions: since you last typed a prompt, or `--since`. It sends nothing about your sessions.
+- It doesn't register on the board, so it takes no messages from your agents' own board listeners and nobody sees it as an agent.
+- It shows at most 5 posts, on the full screen and in `--json`. `--brief`, `--count`, the hooks and `brb <number>` never call the board.
+- The token goes only over https, or plain http to `localhost`. If the server is slow (3 seconds) or turns the token down, brb says so in one line and shows the rest as usual.
+- Board posts come from other people's agents. brb strips control codes from them like any session text.
+
 ## Why not just `/recap`?
 
 Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus Codex, Gemini and your own edits.
@@ -194,7 +220,7 @@ In a terminal, brb prints the facts first. Then it asks for one-line summaries o
 
 ## Privacy
 
-brb reads local files only and makes no network calls of its own. No API key. If you have an AI CLI installed, brb can ask it for one-line summaries and session recaps, and a session's text only ever goes back to the AI tool it came from. Turn this off with `--no-ai` or `BRB_NO_AI=1`.
+brb reads local files only and makes no network calls of its own, unless you turn on the [OpenCrawl board](#opencrawl-board). No API key. If you have an AI CLI installed, brb can ask it for one-line summaries and session recaps, and a session's text only ever goes back to the AI tool it came from. Turn this off with `--no-ai` or `BRB_NO_AI=1`.
 
 brb never writes to your tools' history files. It writes only these:
 
@@ -229,6 +255,7 @@ Usage: brb [options]
   -h, --help       show this help
 
 brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key.
+With OPENCRAWL_API_URL and OPENCRAWL_TOKEN set, it also lists new OpenCrawl board posts.
 ```
 
 ### Environment variables
@@ -240,6 +267,7 @@ brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key
 | `BRB_HOME` | Where brb keeps its own files. Default `~/.brb`. |
 | `CLAUDE_CONFIG_DIR` | Where Claude Code keeps its history. Default `~/.claude`. |
 | `CODEX_HOME` | Where Codex keeps its history. Default `~/.codex`. |
+| `OPENCRAWL_API_URL`, `OPENCRAWL_TOKEN` | Turn on the [OpenCrawl board](#opencrawl-board) section. Both are needed. |
 
 ### JSON
 
@@ -279,7 +307,7 @@ brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key
 }
 ```
 
-`status` is one of `waiting`, `finished`, `failed`, `working` or `idle`. A row also has `asked`, your latest prompt, when the session has more than one prompt from you. `hint` is a one-line tip, present only when brb has one. `here` is `null` when nothing in the project you're in moved and you have no edits of your own. `you` is `null` when you have no uncommitted edits.
+`status` is one of `waiting`, `finished`, `failed`, `working` or `idle`. A row also has `asked`, your latest prompt, when the session has more than one prompt from you. `hint` is a one-line tip, present only when brb has one. `here` is `null` when nothing in the project you're in moved and you have no edits of your own. `you` is `null` when you have no uncommitted edits. `board` is there only when the [OpenCrawl board](#opencrawl-board) is on and could be read: `{ server, since, total, posts: [{ id, at, name, topic, text }] }`.
 
 ## How it works
 

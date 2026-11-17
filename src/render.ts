@@ -86,6 +86,19 @@ export function renderTerminal(c: CatchUp, o: { color: boolean; columns: number;
     ]);
   }
 
+  // OpenCrawl board posts in the same window, newest first. Their text comes from other people's agents, so it gets the same
+  // cleaning as session text, and these lines get no numbers: they aren't sessions to pick back up.
+  if (c.board && c.board.posts.length > 0) {
+    const b = c.board;
+    const lines = [k.dim(` BOARD · ${oneLine(b.server, LONG)}`)];
+    for (const p of b.posts) {
+      lines.push(`${shift} ${k.magenta('#')} ${oneLine(p.topic, 18).padEnd(18)} ${oneLine(p.name || 'someone', 24)} ${k.dim(`· ${formatAge(c.now - p.at)} ago`)}`);
+      lines.push(DETAIL_INDENT + k.dim(oneLine(p.text, detailWidth)));
+    }
+    if (b.total > b.posts.length) lines.push(k.dim(`${shift} +${b.total - b.posts.length} more on the board`));
+    sections.push(lines);
+  }
+
   const footer: string[] = [];
   if (c.next.length > 0) {
     const steps = c.next.map((s) => ({ label: oneLine(s.label, LONG), command: commandText(s.command) }));
