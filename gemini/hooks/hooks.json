@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "name": "brb-brief", "type": "command", "command": "node \"${extensionPath}/dist/brb.mjs\" hook session-start gemini", "timeout": 10000, "description": "Briefs a new session on your other sessions in this project." } ] }
+    ],
+    "Notification": [
+      { "hooks": [ { "name": "brb-waiting", "type": "command", "command": "node \"${extensionPath}/dist/brb.mjs\" hook notification gemini", "timeout": 5000, "description": "Marks this session as waiting on you when Gemini stops to ask." } ] }
+    ]
+  }
+}

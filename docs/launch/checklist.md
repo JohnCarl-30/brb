@@ -12,6 +12,7 @@ Everything here is for the owner. Nothing in this repo posts, publishes or opens
 - [ ] `hesreallyhim/awesome-claude-code`: submit by hand through their issue form on or after 2026-11-19 (`awesome-claude-code.md` has the fields). No PR.
 - `agarrharr/awesome-cli-apps` is archived and takes no submissions.
 - [ ] List the plugin in the Claude Code plugin directories.
+- [ ] Add the `gemini-cli-extension` topic to the repo, so the Gemini CLI extension gallery can find it once a release carries the extension.
 
 ## Launch day
 

@@ -1174,7 +1174,7 @@ function addedTodos(root, files) {
 // src/pending.ts
 import * as fs4 from "fs";
 import * as path6 from "path";
-var MARKER = /^(?:claude|codex)-([\w-]+)\.json$/;
+var MARKER = /^(?:claude|codex|gemini)-([\w-]+)\.json$/;
 var hooksMarker = (brbHome) => path6.join(brbHome, "hooks-on");
 var hooksHaveRun = (brbHome) => fs4.existsSync(hooksMarker(brbHome));
 function recordHookRun(brbHome) {
@@ -1389,12 +1389,33 @@ function codexAsk(input) {
   if (tool === "Bash" && typeof command === "string") return `Codex needs your approval to run ${command}`;
   return `Codex needs your approval${tool ? ` to use ${tool}` : ""}`;
 }
+function geminiAsk(details) {
+  const d = typeof details === "object" && details !== null ? details : {};
+  const text = (value) => typeof value === "string" && value.trim() !== "" ? value : void 0;
+  if (d.type === "ask_user") return "Gemini asked you a question";
+  if (d.type === "exit_plan_mode") return "has a plan waiting for your approval";
+  const command = text(d.command);
+  const file = text(d.fileName);
+  const tool = text(d.toolDisplayName) ?? text(d.toolName);
+  if (d.type === "exec" && command) return `Gemini needs your approval to run ${command}`;
+  if (d.type === "edit" && file) return `Gemini needs your approval to edit ${file}`;
+  if (d.type === "mcp" && tool) return `Gemini needs your approval to use ${tool}`;
+  const title = text(d.title);
+  return `Gemini needs your approval${title ? ` (${title})` : ""}`;
+}
 async function runHook(name, stdin, o) {
   if (o.env.BRB_INTERNAL === "1") return QUIET;
   try {
-    if ((name === "notification" || name === "session-start") && o.argv[2] !== "codex") recordHookRun(resolveRoots(o.env).brb);
+    const host = o.argv[2] === "codex" || o.argv[2] === "gemini" ? o.argv[2] : "claude";
+    if ((name === "notification" || name === "session-start") && host === "claude") recordHookRun(resolveRoots(o.env).brb);
     const input = JSON.parse(stdin) ?? {};
     const sessionId = typeof input.session_id === "string" ? input.session_id : void 0;
+    if (name === "notification" && host === "gemini") {
+      if (sessionId !== void 0 && input.notification_type === "ToolPermission") {
+        recordPermissionRequest(resolveRoots(o.env).brb, sessionId, oneLine(geminiAsk(input.details), 80), o.now, "gemini");
+      }
+      return QUIET;
+    }
     if (name === "notification") {
       const message = typeof input.message === "string" ? input.message : "";
       if (sessionId !== void 0 && (/permission/i.test(message) || input.notification_type === "permission_prompt")) {

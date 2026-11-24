@@ -840,3 +840,19 @@ test('a prompt that only mentions such a tag further in is kept whole', async ()
   writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', messages: [gm.user('what does <hook_context>x</hook_context> mean?', min(30))] });
   expect((await read(h))[0].title).toBe('what does <hook_context>x</hook_context> mean?');
 });
+
+// The shape of a chat a live Gemini CLI 0.71 wrote when its first request failed: its own context as a user message,
+// the prompt behind the SessionStart hook's text, then a rewind that takes the prompt back.
+test('a chat whose only prompt was taken back has no events and no title', async () => {
+  const h = fakeHome();
+  writeGeminiSession(h, { id: '4c5a057a-d9e9-4d36-86d8-dd22cdea9f1c', projectRoot: '/w/shopfront', jsonl: true, mtimeMs: min(3), messages: [
+    { id: 'd04923d38bb0f6017037e74183378ef4', timestamp: iso(min(5)), type: 'user', content: [{ text: '<session_context>\nThis is the Gemini CLI. We are setting up the context for our chat.\n└───src/\n\n\n</session_context>' }] },
+    { $set: { lastUpdated: iso(min(5)) } },
+    { id: 'bf8656a5-f17a-43c2-80e5-5e632bf73325', timestamp: iso(min(4)), type: 'user', content: [{ text: '<hook_context>Catch-up from brb</hook_context>\n\nsay hi' }] },
+    { $set: { lastUpdated: iso(min(4)) } },
+    { $rewindTo: 'bf8656a5-f17a-43c2-80e5-5e632bf73325' },
+    { $set: { lastUpdated: iso(min(3)) } },
+  ] });
+  const [s] = await read(h);
+  expect(s).toMatchObject({ id: '4c5a057a-d9e9-4d36-86d8-dd22cdea9f1c', title: 'untitled session', events: [], lastActivityAt: min(3) });
+});
