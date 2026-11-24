@@ -145,7 +145,7 @@ Cursor's app and CLI write the same transcript files, and those say less than th
 - A permission prompt leaves no trace, so a session blocked on one shows as working and then idle.
 - A project the Cursor app opened is matched to its folder by name. If the folder was moved or deleted, its chats are left out.
 
-Cursor support is new and was built from the Cursor CLI's own code and from transcripts people have published, not checked against a live Cursor. If a session shows wrong, please [open an issue](https://github.com/JohnCarl-30/brb/issues).
+New in 0.12.0. Cursor support was built from the Cursor CLI's own code and from transcripts people have published, not checked against a live Cursor. If a session shows wrong, please [open an issue](https://github.com/JohnCarl-30/brb/issues).
 
 brb leaves out sessions that background agents run by themselves: its own summary runs, and the observer sessions of the [claude-mem](https://github.com/thedotmack/claude-mem) plugin.
 
