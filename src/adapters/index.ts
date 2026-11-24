@@ -14,7 +14,7 @@ export function resolveRoots(env: NodeJS.ProcessEnv): Roots {
   return {
     claude: env.CLAUDE_CONFIG_DIR ?? path.join(home, '.claude'),
     codex: env.CODEX_HOME ?? path.join(home, '.codex'),
-    gemini: path.join(home, '.gemini'), // Gemini CLI has no env override
+    gemini: path.join(env.GEMINI_CLI_HOME || home, '.gemini'), // GEMINI_CLI_HOME stands in for the home folder, not for ~/.gemini
     kiro: path.join(home, '.kiro'),
     brb: env.BRB_HOME ?? path.join(home, '.brb'),
   };

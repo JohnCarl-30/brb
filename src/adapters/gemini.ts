@@ -1,13 +1,17 @@
 import { join, resolve } from 'node:path';
 import { oneLine } from '../text';
 import type { Session, SessionEvent } from '../types';
-import { ERROR_MAX, OUTPUT_KEEP_CHARS, TITLE_MAX,isBackgroundCwd, listFolder, readText, recentFiles, str, textOf } from './files';
+import { ERROR_MAX, OUTPUT_KEEP_CHARS, TITLE_MAX, isBackgroundCwd, listFolder, parseJsonLines, readText, recentFiles, str, textOf } from './files';
 import type { RecentFile } from './files';
 
 // The tools that write a file. A call to one that succeeded is an edit.
 const EDIT_TOOLS = new Set(['replace', 'write_file', 'edit']);
 
 const timeOf = (stamp: unknown): number => (typeof stamp === 'string' ? Date.parse(stamp) : NaN);
+
+// What the CLI puts in front of a prompt for the model: its own notes on the session, and whatever a SessionStart hook
+// (brb's included) printed. The human typed neither, so a prompt is read without them.
+const INJECTED = /^(?:\s*<(hook_context|session_context)>[\s\S]*?<\/\1>)+\s*/;
 
 // Lines Gemini adds around what a shell command printed. `Exit Code` is there only for a non-zero exit.
 const SHELL_META = /^(Exit Code|Process Group PGID|Background PIDs): /;
@@ -62,7 +66,7 @@ function addMessage(events: SessionEvent[], message: any, cwd: string): void {
   const at = timeOf(message?.timestamp);
   if (Number.isNaN(at)) return;
   if (message.type === 'user') {
-    const text = textOf(message.content);
+    const text = textOf(message.content).replace(INJECTED, '');
     if (text.trim() !== '') events.push({ kind: 'user', at, text });
   } else if (message.type === 'gemini') {
     const calls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
@@ -75,15 +79,68 @@ function addMessage(events: SessionEvent[], message: any, cwd: string): void {
   }
 }
 
-// A chat is read whole, since it is one JSON document, so the session never has a partial last turn.
+const isObject = (value: unknown): value is Record<string, any> => typeof value === 'object' && value !== null;
+const listOf = (value: unknown): any[] => (Array.isArray(value) ? value : []);
+
+// A newer Gemini CLI (0.71 does) keeps a chat as a `.jsonl` file it appends to, where an older one rewrote one `.json`
+// document. The first line names the session and every message is a line of its own. A message written again under
+// the same id replaces the earlier one, which is how a tool call gets its result. `$rewindTo` drops a message and all
+// after it, `$patch` changes or removes messages, and `$set` changes the session's own fields. Replaying the lines in
+// the CLI's own order of checks gives the shape of the older document. `$patch.orderIds` is left out: events are
+// sorted by time anyway. A line that is still being written doesn't parse and is skipped.
+function replayLines(text: string): { sessionId: unknown; messages: any[] } {
+  let sessionId: unknown;
+  const messages = new Map<string, any>();
+  const addAll = (list: unknown): void => {
+    for (const message of listOf(list)) if (typeof message?.id === 'string') messages.set(message.id, message);
+  };
+  const patch = (change: any): void => {
+    const message = messages.get(change?.id);
+    if (!message) return;
+    if (change.content !== undefined) message.content = change.content;
+    for (const callChange of listOf(change.toolCalls)) {
+      const call = listOf(message.toolCalls).find((c) => c?.id === callChange?.id);
+      if (call && isObject(callChange) && 'result' in callChange) call.result = callChange.result;
+    }
+  };
+  for (const record of parseJsonLines(text.split('\n'))) {
+    if (typeof record.$rewindTo === 'string') {
+      const ids = [...messages.keys()];
+      const from = ids.indexOf(record.$rewindTo);
+      for (const id of from === -1 ? ids : ids.slice(from)) messages.delete(id); // an id it never wrote rewinds everything
+    } else if (isObject(record.$patch)) {
+      patch(record.$patch);
+      for (const change of listOf(record.$patch.updates)) patch(change);
+      for (const id of listOf(record.$patch.removeIds)) messages.delete(id);
+    } else if (typeof record.id === 'string') {
+      messages.set(record.id, record);
+    } else if (isObject(record.$set)) {
+      if (Array.isArray(record.$set.messages)) {
+        messages.clear();
+        addAll(record.$set.messages);
+      }
+      sessionId = str(record.$set.sessionId) ?? sessionId;
+    } else if (typeof record.sessionId === 'string') {
+      sessionId = record.sessionId;
+      addAll(record.messages);
+    }
+  }
+  return { sessionId, messages: [...messages.values()] };
+}
+
+// A chat is read whole, whichever of the two formats it is in.
 export async function readSession(file: RecentFile, cwd: string): Promise<Session | null> {
   const text = await readText(file.path);
   if (text === null) return null; // removed since it was listed
   let chat: any;
-  try {
-    chat = JSON.parse(text);
-  } catch {
-    return null; // not JSON: a chat that is being rewritten right now, or not a chat at all
+  if (file.path.endsWith('.jsonl')) {
+    chat = replayLines(text);
+  } else {
+    try {
+      chat = JSON.parse(text);
+    } catch {
+      return null; // not JSON: a chat that is being rewritten right now, or not a chat at all
+    }
   }
   const id = str(chat?.sessionId);
   if (id === undefined) return null;
@@ -103,14 +160,21 @@ export async function readSession(file: RecentFile, cwd: string): Promise<Sessio
   };
 }
 
-// A project folder holds its chats, and in `.project_root` the folder the project lives in.
+// A project folder holds its chats, and in `.project_root` the folder the project lives in. A subagent's chat sits a
+// folder deeper under another name, so it is never listed.
 async function readProject(folder: string, sinceMs: number): Promise<Session[]> {
-  const files = await recentFiles(join(folder, 'chats'), /^session-.*\.json$/, sinceMs, 1);
+  const files = await recentFiles(join(folder, 'chats'), /^session-.*\.jsonl?$/, sinceMs, 1);
   if (files.length === 0) return []; // nothing recent, so there is no need to ask where the project lives
   const cwd = (await readText(join(folder, '.project_root')))?.trim();
   if (!cwd || isBackgroundCwd(cwd)) return []; // a project that never said where it lives, or one of brb's own summary runs
   const sessions = await Promise.all(files.map((file) => readSession(file, cwd)));
-  return sessions.filter((s): s is Session => s !== null);
+  // A `.json` chat that a newer CLI resumed goes on in a `.jsonl` beside it, so one session can have two files.
+  // The one that moved last is the session.
+  const newest = new Map<string, Session>();
+  for (const s of sessions) {
+    if (s !== null && s.lastActivityAt >= (newest.get(s.id)?.lastActivityAt ?? -Infinity)) newest.set(s.id, s);
+  }
+  return [...newest.values()];
 }
 
 // `root` is the Gemini folder (~/.gemini). `o.now` is unused here: every adapter takes the same options.

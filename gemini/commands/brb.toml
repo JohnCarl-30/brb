@@ -1,0 +1,6 @@
+description = "Catch up on every AI coding session, here and in your other projects"
+prompt = """
+!{node "$HOME/.gemini/extensions/brb/dist/brb.mjs" --no-ai --no-color}
+
+Show the user the catch-up above exactly as printed, in a code block, without summarizing it. The list includes the session you are in. Then ask which item they want to pick up first. To pick one up they run `brb <number>` in a terminal of their own; don't run it for them, because it starts another tool's session.
+"""

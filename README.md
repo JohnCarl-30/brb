@@ -130,11 +130,13 @@ Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus C
 |---|---|---|
 | Claude Code | `~/.claude/projects` | Questions, plans and permission prompts (permission prompts need the plugin) |
 | Codex CLI | `~/.codex/sessions` | Questions and approval prompts (approval prompts need the plugin) |
-| Gemini CLI | `~/.gemini/tmp` | Questions |
+| Gemini CLI | `~/.gemini/tmp` | Questions, plans and approval prompts (plans and approval prompts need the extension) |
 | Kiro | `~/.kiro/sessions` | Questions and permission prompts |
 | Cursor | Planned ([#11](https://github.com/JohnCarl-30/brb/issues/11)) | |
 
-If you moved a tool's folder, brb follows the same variable the tool does: `CLAUDE_CONFIG_DIR` for Claude Code and `CODEX_HOME` for Codex. Gemini CLI and Kiro have no such variable, so brb always reads `~/.gemini` and `~/.kiro`.
+If you moved a tool's folder, brb follows the same variable the tool does: `CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for Codex and `GEMINI_CLI_HOME` for Gemini CLI. Kiro has no such variable, so brb always reads `~/.kiro`.
+
+brb reads both ways Gemini CLI has saved chats: one `.json` file per chat in older versions, and one `.jsonl` file per chat in newer ones.
 
 brb leaves out sessions that background agents run by themselves: its own summary runs, and the observer sessions of the [claude-mem](https://github.com/thedotmack/claude-mem) plugin.
 
@@ -184,9 +186,27 @@ The plugin adds the same three things as the Claude Code one:
 
 It needs Node 20 or newer on your PATH. To update, run `codex plugin marketplace upgrade brb` and then `codex plugin add brb@brb`.
 
+## Gemini CLI extension
+
+```
+gemini extensions install https://github.com/JohnCarl-30/brb
+```
+
+Gemini CLI shows what the extension adds and asks before it installs. It takes the extension from this repo's latest [GitHub release](https://github.com/JohnCarl-30/brb/releases).
+
+The extension adds the same three things:
+
+- A SessionStart hook that briefs every new or resumed Gemini session on the other sessions in the same project.
+- A Notification hook that marks a Gemini session waiting on you the moment it stops to ask: a command, an edit or a tool to approve, a question, or a plan. brb shows the command or the file name. It only records the prompt; you still answer it in Gemini CLI.
+- `/brb`, which prints the catch-up inside Gemini CLI. The first time, Gemini CLI asks you to allow the command it runs.
+
+To update, run `gemini extensions update brb`.
+
+Installing the extension and the SessionStart hook were checked against Gemini CLI 0.71. The Notification hook and `/brb` are not yet confirmed in a live Gemini session. If either misbehaves, please [open an issue](https://github.com/JohnCarl-30/brb/issues).
+
 ## Other agents
 
-Gemini CLI users, and Codex users without the plugin, can give their agent the same briefing. Add a line like this to `GEMINI.md` or `AGENTS.md`:
+Without the Codex plugin or the Gemini CLI extension, you can still give those agents the same briefing. Add a line like this to `AGENTS.md` or `GEMINI.md`:
 
 ```
 Run `npx @john_carl/brb --brief` before starting a task.
@@ -227,7 +247,7 @@ brb never writes to your tools' history files. It writes only these:
 - `~/.brb/cache/summaries.json`, the summary cache.
 - `~/.brb/cache/recaps.json`, the recap cache.
 - `~/.brb/recaps/`, one recap page per session you open with `brb show`, deleted after 7 days.
-- `~/.brb/pending/`, one small file per Claude or Codex session blocked on a permission prompt (plugins only).
+- `~/.brb/pending/`, one small file per Claude, Codex or Gemini session blocked on a prompt (plugins and the extension only).
 - `~/.brb/hooks-on`, an empty file that says the Claude Code plugin's hooks have run (plugin only).
 - `~/.brb/seen.json`, when you last picked each session.
 - `brb-summaries/` in your temp folder, where summary and recap prompts run.
@@ -267,6 +287,7 @@ With OPENCRAWL_API_URL and OPENCRAWL_TOKEN set, it also lists new OpenCrawl boar
 | `BRB_HOME` | Where brb keeps its own files. Default `~/.brb`. |
 | `CLAUDE_CONFIG_DIR` | Where Claude Code keeps its history. Default `~/.claude`. |
 | `CODEX_HOME` | Where Codex keeps its history. Default `~/.codex`. |
+| `GEMINI_CLI_HOME` | The folder that holds Gemini CLI's `.gemini` folder. Default your home folder. |
 | `OPENCRAWL_API_URL`, `OPENCRAWL_TOKEN` | Turn on the [OpenCrawl board](#opencrawl-board) section. Both are needed. |
 
 ### JSON
@@ -322,7 +343,7 @@ Limits: files an agent changes through a shell command (Claude's Bash, Codex's s
 
 ## Troubleshooting
 
-**"brb found no AI sessions from the last 7 days."** brb only reads sessions from the last week. If a tool keeps its history somewhere else, set `CLAUDE_CONFIG_DIR` or `CODEX_HOME` the same way you set it for the tool.
+**"brb found no AI sessions from the last 7 days."** brb only reads sessions from the last week. If a tool keeps its history somewhere else, set `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `GEMINI_CLI_HOME` the same way you set it for the tool.
 
 **"nothing moved".** Nothing changed since your last message in this project, or you already picked everything that did. Use `--since 1d` to look further back.
 
@@ -343,7 +364,7 @@ npm run typecheck
 npm run build       # bundles dist/brb.mjs
 ```
 
-The plugin runs `dist/brb.mjs` straight from the repo, so it is committed. `npm ci` sets up a pre-commit hook that rebuilds it with every commit, and CI fails on a stale one. Tests run against a made-up home folder and never read your real sessions. `npm run demo:seed` builds the demo world used for the GIF, and `vhs demo/demo.tape` records it (it needs [VHS](https://github.com/charmbracelet/vhs)).
+The plugin runs `dist/brb.mjs` straight from the repo, so it is committed. `npm ci` sets up a pre-commit hook that rebuilds it with every commit, and CI fails on a stale one. The Gemini CLI extension is the `gemini/` folder with `dist/brb.mjs` added: when a new version lands on `main`, the Release workflow packs the two into an archive (`scripts/pack-gemini-extension.sh`) and publishes it as a GitHub release. Tests run against a made-up home folder and never read your real sessions. `npm run demo:seed` builds the demo world used for the GIF, and `vhs demo/demo.tape` records it (it needs [VHS](https://github.com/charmbracelet/vhs)).
 
 ## License
 

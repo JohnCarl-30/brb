@@ -1,0 +1,36 @@
+name: Release
+
+# Publishes a GitHub Release for a new version on main, with the Gemini CLI extension as its one asset.
+# `gemini extensions install https://github.com/JohnCarl-30/brb` downloads the latest release's asset.
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check whether this version is already released
+        id: version
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Pack the Gemini CLI extension
+        if: steps.version.outputs.released != 'true'
+        run: sh scripts/pack-gemini-extension.sh brb-gemini-extension.tar.gz
+      - name: Publish the release
+        if: steps.version.outputs.released != 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$TAG" brb-gemini-extension.tar.gz --target "$GITHUB_SHA" --title "$TAG" --generate-notes

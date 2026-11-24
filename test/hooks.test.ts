@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -6,7 +7,7 @@ import { HOOK_HINT } from '../src/catchup';
 import { run } from '../src/cli';
 import { runHook } from '../src/hooks';
 import { readPermissionRequests } from '../src/pending';
-import { cl, cx, writeClaudeSession, writeCodexSession } from './support/fake-home';
+import { cl, cx, gm, writeClaudeSession, writeCodexSession, writeGeminiSession } from './support/fake-home';
 import pkg from '../package.json';
 import { EXPECTED_BRIEF, NOW } from './support/expected';
 import { seedScenario } from './support/scenario';
@@ -174,4 +175,93 @@ test('the Codex plugin points at files that exist, hooks brb handles, and the pa
   expect(Object.keys(hooks)).toEqual(['SessionStart', 'PermissionRequest']);
   const commands = Object.values(hooks).flat().flatMap((g) => (g as { hooks: { command: string }[] }).hooks.map((x) => x.command));
   expect(commands.map((c) => /brb\.mjs" hook ([\w-]+) codex \|\| true$/.exec(c)?.[1])).toEqual(['session-start', 'permission-request']);
+});
+
+// ---- Gemini CLI: its extension runs the same hooks with a third argument of `gemini`.
+const geminiHook = (name: string, input: object, home: string, cwd = world.repo) => {
+  const stdin = JSON.stringify(input);
+  return runHook(name, stdin, { argv: ['hook', name, 'gemini'], env: { HOME: home }, cwd, now: NOW, isTTY: false, stdin });
+};
+// What Gemini CLI 0.71 sends: the kind of prompt is in `details.type`, and `message` only says "Tool <title> requires …".
+const geminiAsks = (details: object, sessionId: string | undefined = 'gem-1') =>
+  ({ ...(sessionId ? { session_id: sessionId } : {}), hook_event_name: 'Notification', notification_type: 'ToolPermission', message: 'Tool Confirm requires confirmation', details });
+
+test.each([
+  ['the command it wants to run', { type: 'exec', title: 'Confirm Shell Command', command: 'npm run migrate', rootCommand: 'npm' }, 'Gemini needs your approval to run npm run migrate'],
+  ['the file it wants to edit, never the new text', { type: 'edit', title: 'Confirm Edit: src/cart.ts', fileName: 'cart.ts', filePath: '/w/src/cart.ts', newContent: 'secret' }, 'Gemini needs your approval to edit cart.ts'],
+  ['the MCP tool by the name the user sees', { type: 'mcp', title: 'Confirm: write', serverName: 'fs', toolName: 'write_file', toolDisplayName: 'Write File' }, 'Gemini needs your approval to use Write File'],
+  ['a question', { type: 'ask_user', title: 'Ask User' }, 'Gemini asked you a question'],
+  ['a plan', { type: 'exit_plan_mode', title: 'Plan Approval' }, 'has a plan waiting for your approval'],
+  ['the title of any other prompt', { type: 'info', title: 'Confirm Web Fetch', prompt: 'fetch https://example.com' }, 'Gemini needs your approval (Confirm Web Fetch)'],
+  ['the title when a command prompt names no command', { type: 'exec', title: 'Confirm Shell Command', command: ' ' }, 'Gemini needs your approval (Confirm Shell Command)'],
+  ['a plain line when the details say nothing', undefined, 'Gemini needs your approval'],
+])('the Gemini notification hook records %s, and prints nothing so the user still decides', async (_what, details, message) => {
+  const home = path.join(tmp, `gemini-ask-${message.length}`);
+  expect(await geminiHook('notification', geminiAsks(details as object), home)).toEqual({ stdout: '', exitCode: 0 });
+  expect(readPermissionRequests(path.join(home, '.brb'), NOW)).toEqual(new Map([['gem-1', { at: NOW, message }]]));
+  expect(fs.readdirSync(path.join(home, '.brb'))).toEqual(['pending']); // and no hooks-on marker: that one is about Claude's plugin
+  expect(fs.readdirSync(path.join(home, '.brb', 'pending'))).toEqual(['gemini-gem-1.json']);
+});
+
+test('the Gemini notification hook writes nothing for another kind of notification or without a session id, and cuts a long command', async () => {
+  const home = path.join(tmp, 'gemini-quiet');
+  await geminiHook('notification', { ...geminiAsks({ type: 'exec', command: 'ls' }), notification_type: 'SomethingNew' }, home);
+  await geminiHook('notification', geminiAsks({ type: 'exec', command: 'ls' }, ''), home);
+  // Claude's wording means nothing here: only Gemini's own notification type counts.
+  await geminiHook('notification', { session_id: 'gem-2', message: 'Claude needs your permission to use Bash', notification_type: 'permission_prompt' }, home);
+  expect(fs.existsSync(path.join(home, '.brb'))).toBe(false);
+  await geminiHook('notification', geminiAsks({ type: 'exec', command: 'x'.repeat(500) }, 'gem-3'), home);
+  expect(readPermissionRequests(path.join(home, '.brb'), NOW).get('gem-3')!.message).toHaveLength(80);
+});
+
+test('a Gemini session that stopped to ask reads as waiting on you', async () => {
+  const w = seedScenario(path.join(tmp, 'gemini-wait'), NOW);
+  const id = 'c0ffee00-0000-4000-8000-000000000009';
+  const h = { home: w.home, claude: path.join(w.home, '.claude'), codex: path.join(w.home, '.codex'), gemini: path.join(w.home, '.gemini'), kiro: path.join(w.home, '.kiro'), brb: path.join(w.home, '.brb') };
+  writeGeminiSession(h, { id, projectRoot: w.repo, jsonl: true, messages: [gm.user('migrate the database', NOW - 30_000), gm.say('I will run the migration.', NOW - 20_000)] });
+  const row = async () => {
+    const { stdout } = await run({ argv: ['--json'], env: { HOME: w.home }, cwd: w.repo, now: NOW, isTTY: false });
+    return JSON.parse(stdout).here.rows.find((r: { sessionId: string }) => r.sessionId === id);
+  };
+  expect((await row())?.status).not.toBe('waiting');
+  await geminiHook('notification', geminiAsks({ type: 'exec', title: 'Confirm Shell Command', command: 'npm run migrate' }, id), w.home, w.repo);
+  expect(await row()).toMatchObject({ tool: 'gemini', status: 'waiting', detail: 'Gemini needs your approval to run npm run migrate' });
+});
+
+test('the Gemini session-start hook briefs like Claude\'s, leaves the Gemini session out, and does not count as Claude\'s hooks being on', async () => {
+  const w = seedScenario(path.join(tmp, 'gemini-start'), NOW);
+  // The input Gemini CLI 0.71 sent in a live run, with the scenario's own Claude session standing in as the one starting.
+  const id = '8f2c1d9e-0000-4000-8000-000000000001';
+  const { stdout } = await geminiHook('session-start', { session_id: id, transcript_path: '/x/chats/session-2026-11-05T15-00-8f2c1d9e.jsonl', cwd: w.repo, hook_event_name: 'SessionStart', timestamp: '2026-11-05T15:00:00.000Z', source: 'startup' }, w.home, '/');
+  const out = JSON.parse(stdout);
+  expect(out.systemMessage).toBe('brb: 2 other sessions in this project');
+  expect(out.hookSpecificOutput).toMatchObject({ hookEventName: 'SessionStart' });
+  expect(out.hookSpecificOutput.additionalContext).toContain('upgrade to Next 16');
+  expect(out.hookSpecificOutput.additionalContext).not.toContain('fix checkout rounding');
+  expect(fs.existsSync(path.join(w.home, '.brb', 'hooks-on'))).toBe(false);
+});
+
+// The files Gemini CLI reads. It runs a hook's command in bash or in PowerShell, so the command is one both can run, and
+// its timeout is in milliseconds where Claude's and Codex's are in seconds.
+test('the Gemini extension has hooks brb handles, a /brb command, and the package version', () => {
+  const root = new URL('../gemini/', import.meta.url);
+  const read = (file: string) => JSON.parse(fs.readFileSync(new URL(file, root), 'utf8'));
+  expect(read('gemini-extension.json')).toMatchObject({ name: 'brb', version: pkg.version });
+  const hooks = read('hooks/hooks.json').hooks;
+  expect(Object.keys(hooks)).toEqual(['SessionStart', 'Notification']);
+  const all = Object.values(hooks).flat().flatMap((g) => (g as { hooks: { command: string; timeout: number; type: string }[] }).hooks);
+  expect(all.map((x) => /^node "\$\{extensionPath\}\/dist\/brb\.mjs" hook ([\w-]+) gemini$/.exec(x.command)?.[1])).toEqual(['session-start', 'notification']);
+  expect(all.map((x) => [x.type, x.timeout])).toEqual([['command', 10_000], ['command', 5_000]]);
+  const command = fs.readFileSync(new URL('commands/brb.toml', root), 'utf8');
+  expect(command).toMatch(/^description = ".+"$/m);
+  expect(command).toContain('!{node "$HOME/.gemini/extensions/brb/dist/brb.mjs" --no-ai --no-color}');
+});
+
+// Gemini CLI installs an extension only when its manifest is at the root of what it downloads, so the release archive
+// is the gemini/ folder with brb's bundle inside it.
+test.skipIf(process.platform === 'win32')('the Gemini extension packs into an archive with the manifest and the bundle at its root', () => {
+  const archive = path.join(tmp, 'brb-gemini-extension.tar.gz');
+  execFileSync('sh', ['scripts/pack-gemini-extension.sh', archive], { cwd: new URL('..', import.meta.url) });
+  const files = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).split('\n').map((f) => f.replace(/^\.\//, '')).filter((f) => f !== '' && !f.endsWith('/'));
+  expect(files.sort()).toEqual(['LICENSE', 'commands/brb.toml', 'dist/brb.mjs', 'gemini-extension.json', 'hooks/hooks.json']);
 });
