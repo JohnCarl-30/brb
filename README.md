@@ -202,7 +202,7 @@ The extension adds the same three things:
 
 To update, run `gemini extensions update brb`.
 
-Installing the extension and the SessionStart hook were checked against Gemini CLI 0.71. The Notification hook and `/brb` are not yet confirmed in a live Gemini session. If either misbehaves, please [open an issue](https://github.com/JohnCarl-30/brb/issues).
+New in 0.11.0. Installing the extension and the SessionStart hook were checked against Gemini CLI 0.71. The Notification hook and `/brb` are not yet confirmed in a live Gemini session. If either misbehaves, please [open an issue](https://github.com/JohnCarl-30/brb/issues).
 
 ## Other agents
 
