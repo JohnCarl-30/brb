@@ -8,7 +8,7 @@ export const IDS = {
 };
 
 export const HERO = "Step away from your AI coding sessions. When you're back, `brb` shows you everything that moved in one screen.";
-export const POSITIONING = "Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus Codex, Gemini and your own edits.";
+export const POSITIONING = "Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus Codex, Gemini, Kiro, Cursor and your own edits.";
 export const PRIVACY = "brb reads local files only and makes no network calls of its own, unless you turn on the [OpenCrawl board](#opencrawl-board). No API key. If you have an AI CLI installed, brb can ask it for one-line summaries and session recaps, and a session's text only ever goes back to the AI tool it came from. Turn this off with `--no-ai` or `BRB_NO_AI=1`.";
 
 export const NOW = Date.UTC(2026, 10, 5, 15, 0, 0);
