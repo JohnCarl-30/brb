@@ -36,7 +36,7 @@ export interface CatchUpInput {
   excludeSessionId?: string; sinceMs?: number; warnings: string[];
 }
 
-export const TOOL_NAME: Record<Tool, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', kiro: 'Kiro' };
+export const TOOL_NAME: Record<Tool, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', kiro: 'Kiro', cursor: 'Cursor' };
 
 export const FIRST_RUN_MS = 8 * 60 * 60_000;
 const MAX_FILES = 5;
@@ -48,11 +48,13 @@ const ORDER: Status[] = ['waiting', 'finished', 'failed', 'working', 'idle'];
 const quote = (s: string): string => (/^[A-Za-z0-9._/~@+-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
 const quotePath = (p: string): string => (p.startsWith('~/') ? `~/${quote(p.slice(2))}` : quote(p));
 
-const RESUME: Record<Tool, (id: string) => string> = {
+const RESUME: Record<Tool, (id: string, s: Session) => string> = {
   claude: (id) => `claude --resume ${quote(id)}`,
   codex: (id) => `codex resume ${quote(id)}`,
   gemini: (id) => `gemini --resume ${quote(id)}`,
   kiro: () => 'kiro .', // Kiro is an IDE: this opens the project, not the chat itself
+  // A chat from Cursor's CLI resumes in it. One from the app can only be opened there, like Kiro's.
+  cursor: (id, s) => (s.ide ? 'cursor .' : `cursor-agent --resume ${quote(id)}`),
 };
 
 const inside = (dir: string, p: string): boolean => p.startsWith(dir + path.sep);
@@ -105,7 +107,7 @@ export function buildCatchUp(input: CatchUpInput): CatchUp {
 
   const hereFolders = new Set([input.cwd, ...(git ? [git.root] : [])].map(realpath));
   const resumeFor = (s: Session): string =>
-    (hereFolders.has(realpath(s.cwd)) ? '' : `cd ${quotePath(tilde(s.cwd, home))} && `) + RESUME[s.tool](s.id);
+    (hereFolders.has(realpath(s.cwd)) ? '' : `cd ${quotePath(tilde(s.cwd, home))} && `) + RESUME[s.tool](s.id, s);
 
   let maybeBlocked = false;
   const rows = sessions

@@ -33,7 +33,7 @@ Usage: brb [options]
   -v, --version    print the version
   -h, --help       show this help
 
-brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key.
+brb reads your local Claude Code, Codex, Gemini CLI, Kiro and Cursor history. No API key.
 With OPENCRAWL_API_URL and OPENCRAWL_TOKEN set, it also lists new OpenCrawl board posts.
 `;
 

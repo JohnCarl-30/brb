@@ -1,4 +1,4 @@
-export type Tool = 'claude' | 'codex' | 'gemini' | 'kiro';
+export type Tool = 'claude' | 'codex' | 'gemini' | 'kiro' | 'cursor';
 export type Status = 'waiting' | 'finished' | 'failed' | 'working' | 'idle';
 export type SessionEvent =
   | { kind: 'user'; at: number; text: string }                  // a prompt the human typed
@@ -19,6 +19,7 @@ export interface Session {
   pendingTool?: { at: number; label: string }; // the last thing was a tool call with no result yet: still running, or blocked on a permission prompt
   partialTurn?: boolean;   // the reader skipped part of the last turn, so its edits, commands or answers may be unseen
   file?: string;           // the history file it was read from
+  ide?: boolean;           // the chat lives in the tool's app: a shell command can open the project, not resume the chat
 }
 export interface PermissionRequest { at: number; message: string }
 // `maybeBlocked`: working only because a tool call has had no result, which is also what a permission prompt looks like.

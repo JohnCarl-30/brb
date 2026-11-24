@@ -48,6 +48,7 @@ describe('commandFor', () => {
     expect(commandFor('codex', 'p')).toEqual({ bin: 'codex', args: ['exec', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', 'p'] });
     expect(commandFor('gemini', 'p')).toEqual({ bin: 'gemini', args: ['-p', 'p', '--approval-mode', 'plan'] });
     expect(commandFor('kiro', 'p')).toBeNull(); // no headless mode known to run with tools off
+    expect(commandFor('cursor', 'p')).toBeNull(); // the same
   });
 });
 

@@ -75,7 +75,7 @@ Every session row has a number. In a terminal, brb asks which one you want right
 
 Type the number and press Enter. Enter on its own, `q` or Ctrl-C leaves without resuming anything. If you already know the number, skip the question with `brb 3`.
 
-brb prints the command, then runs it. A session from another project gets a `cd` into its folder first, so you land in the right place with the right CLI: `claude --resume`, `codex resume` or `gemini --resume`. Kiro is an IDE, so for a Kiro session brb runs `kiro .`, which opens the project; pick the chat from Kiro's session list. When you quit that CLI you're back in your shell, and brb exits with the CLI's exit code.
+brb prints the command, then runs it. A session from another project gets a `cd` into its folder first, so you land in the right place with the right CLI: `claude --resume`, `codex resume` or `gemini --resume`. Kiro is an IDE, so for a Kiro session brb runs `kiro .`, which opens the project; pick the chat from Kiro's session list. Cursor has both: a chat from its CLI resumes with `cursor-agent --resume`, and one from the Cursor app opens the project with `cursor .`. When you quit that CLI you're back in your shell, and brb exits with the CLI's exit code.
 
 - With npx, the number goes at the end: `npx @john_carl/brb 3`.
 - Outside a terminal, piped or in a script, brb doesn't ask, and `brb 3` only prints the command.
@@ -132,11 +132,20 @@ Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus C
 | Codex CLI | `~/.codex/sessions` | Questions and approval prompts (approval prompts need the plugin) |
 | Gemini CLI | `~/.gemini/tmp` | Questions, plans and approval prompts (plans and approval prompts need the extension) |
 | Kiro | `~/.kiro/sessions` | Questions and permission prompts |
-| Cursor | Planned ([#11](https://github.com/JohnCarl-30/brb/issues/11)) | |
+| Cursor (app and CLI) | `~/.cursor/projects` | Questions and plans |
 
-If you moved a tool's folder, brb follows the same variable the tool does: `CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for Codex and `GEMINI_CLI_HOME` for Gemini CLI. Kiro has no such variable, so brb always reads `~/.kiro`.
+If you moved a tool's folder, brb follows the same variable the tool does: `CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for Codex, `GEMINI_CLI_HOME` for Gemini CLI, and `CURSOR_DATA_DIR` and `CURSOR_CONFIG_DIR` for Cursor. Kiro has no such variable, so brb always reads `~/.kiro`.
 
 brb reads both ways Gemini CLI has saved chats: one `.json` file per chat in older versions, and one `.jsonl` file per chat in newer ones.
+
+Cursor's app and CLI write the same transcript files, and those say less than the other tools' history does:
+
+- A command has no result in the transcript, so a Cursor session never shows as stopped because a command failed. It shows as stopped only when Cursor recorded an error or an interruption.
+- Only your prompts have a time, to the minute. The rest of a turn is dated by when the file last changed.
+- A permission prompt leaves no trace, so a session blocked on one shows as working and then idle.
+- A project the Cursor app opened is matched to its folder by name. If the folder was moved or deleted, its chats are left out.
+
+Cursor support is new and was built from the Cursor CLI's own code and from transcripts people have published, not checked against a live Cursor. If a session shows wrong, please [open an issue](https://github.com/JohnCarl-30/brb/issues).
 
 brb leaves out sessions that background agents run by themselves: its own summary runs, and the observer sessions of the [claude-mem](https://github.com/thedotmack/claude-mem) plugin.
 
@@ -232,7 +241,7 @@ The Claude Code line needs `jq`, which reads the session's id from what Claude C
 
 In a terminal, brb prints the facts first. Then it asks for one-line summaries of finished and stopped sessions and redraws the screen with them. You never wait on AI to see the list, and Ctrl-C skips the summaries.
 
-- Each session is summarized by the tool it came from, and only if that tool is installed: Claude Code runs `claude -p` with Haiku and no tools, Codex runs `codex exec` in a read-only sandbox, and Gemini runs `gemini -p` in plan mode. None of them can change files. Kiro sessions get no summary: brb knows no way to run Kiro headless with its tools off.
+- Each session is summarized by the tool it came from, and only if that tool is installed: Claude Code runs `claude -p` with Haiku and no tools, Codex runs `codex exec` in a read-only sandbox, and Gemini runs `gemini -p` in plan mode. None of them can change files. Kiro and Cursor sessions get no summary: brb knows no way to run either headless with its tools off.
 - These runs use your existing login for that CLI, so they count toward that tool's usage like any other prompt. brb holds no key.
 - brb summarizes at most 8 sessions per run and gives each 20 seconds. Summaries are cached in `~/.brb/cache/summaries.json`, so a session that hasn't moved is never summarized twice.
 - The summary runs stay out of your history and out of brb's list. They run in a private `brb-summaries` folder in your temp folder, which brb skips.
@@ -274,7 +283,7 @@ Usage: brb [options]
   -v, --version    print the version
   -h, --help       show this help
 
-brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key.
+brb reads your local Claude Code, Codex, Gemini CLI, Kiro and Cursor history. No API key.
 With OPENCRAWL_API_URL and OPENCRAWL_TOKEN set, it also lists new OpenCrawl board posts.
 ```
 
@@ -288,6 +297,8 @@ With OPENCRAWL_API_URL and OPENCRAWL_TOKEN set, it also lists new OpenCrawl boar
 | `CLAUDE_CONFIG_DIR` | Where Claude Code keeps its history. Default `~/.claude`. |
 | `CODEX_HOME` | Where Codex keeps its history. Default `~/.codex`. |
 | `GEMINI_CLI_HOME` | The folder that holds Gemini CLI's `.gemini` folder. Default your home folder. |
+| `CURSOR_DATA_DIR` | Where Cursor keeps its transcripts. Default `~/.cursor`. |
+| `CURSOR_CONFIG_DIR` | Where Cursor's CLI keeps the chats it can resume. Default `~/.cursor`, or `$XDG_CONFIG_HOME/cursor` when that is set. |
 | `OPENCRAWL_API_URL`, `OPENCRAWL_TOKEN` | Turn on the [OpenCrawl board](#opencrawl-board) section. Both are needed. |
 
 ### JSON
@@ -339,11 +350,11 @@ With OPENCRAWL_API_URL and OPENCRAWL_TOKEN set, it also lists new OpenCrawl boar
 - A session you picked (resumed with its number, or opened its recap) leaves the list until it does something new. Looking at the list doesn't count. Waiting sessions always stay, and `--since` shows picked ones again.
 - Your own edits are the uncommitted files that no session's file-edit tool calls account for.
 
-Limits: files an agent changes through a shell command (Claude's Bash, Codex's shell, Gemini's shell: formatters, `sed -i`, codegen) can't be told apart from your own edits, so they show up in the You row.
+Limits: files an agent changes through a shell command (Claude's Bash, the shell of Codex, Gemini or Cursor: formatters, `sed -i`, codegen) can't be told apart from your own edits, so they show up in the You row.
 
 ## Troubleshooting
 
-**"brb found no AI sessions from the last 7 days."** brb only reads sessions from the last week. If a tool keeps its history somewhere else, set `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `GEMINI_CLI_HOME` the same way you set it for the tool.
+**"brb found no AI sessions from the last 7 days."** brb only reads sessions from the last week. If a tool keeps its history somewhere else, set `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GEMINI_CLI_HOME` or `CURSOR_DATA_DIR` the same way you set it for the tool.
 
 **"nothing moved".** Nothing changed since your last message in this project, or you already picked everything that did. Use `--since 1d` to look further back.
 

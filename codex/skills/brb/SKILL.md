@@ -1,6 +1,6 @@
 ---
 name: brb
-description: Catch up on every AI coding session, here and in the user's other projects. Use when the user types brb, comes back after a break, or asks what their other Claude Code, Codex, Gemini or Kiro sessions did.
+description: Catch up on every AI coding session, here and in the user's other projects. Use when the user types brb, comes back after a break, or asks what their other Claude Code, Codex, Gemini, Kiro or Cursor sessions did.
 ---
 
 Run this in the project folder and show the user its output exactly as printed, in a code block, without summarizing it:

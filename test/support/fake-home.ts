@@ -4,12 +4,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-export interface FakeHome { home: string; claude: string; codex: string; gemini: string; kiro: string; brb: string }
+export interface FakeHome { home: string; claude: string; codex: string; gemini: string; kiro: string; cursor: string; brb: string }
 
 export function makeFakeHome(): FakeHome {
   // realpath, because the tmp folder is a symlink on macOS (/var -> /private/var) and brb works with real paths.
   const home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'brb-home-'));
-  return { home, claude: path.join(home, '.claude'), codex: path.join(home, '.codex'), gemini: path.join(home, '.gemini'), kiro: path.join(home, '.kiro'), brb: path.join(home, '.brb') };
+  return { home, claude: path.join(home, '.claude'), codex: path.join(home, '.codex'), gemini: path.join(home, '.gemini'), kiro: path.join(home, '.kiro'), cursor: path.join(home, '.cursor'), brb: path.join(home, '.brb') };
 }
 
 export const iso = (ms: number) => new Date(ms).toISOString();
@@ -208,5 +208,58 @@ export function writeKiroSession(
   fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   const mtime = o.mtimeMs ?? (times.length > 0 ? Math.max(...times) : undefined);
   if (mtime !== undefined) fs.utimesSync(file, new Date(mtime), new Date(mtime));
+  return file;
+}
+
+// ---- Cursor: <cursor>/projects/<the folder's path with every run of other characters as one '-'>/agent-transcripts/<chat id>/<chat id>.jsonl
+// A line is { role, message: { content } } with text and tool_use blocks, and no time of its own. A prompt carries
+// the minute it was sent, in a <timestamp> tag, and what was typed inside <user_query>. Older files end a turn with a
+// { type: 'turn_ended' } line. The shapes are from the Cursor CLI's writer (2026.11.22) and from transcripts people
+// posted; no line is copied from one.
+
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+export const cu = {
+  // Cursor's stamp for a time, as a clock `offsetHours` ahead of UTC would show it: Thursday, Nov 5, 2026, 4:10 PM (UTC+2).
+  stamp: (at: number, offsetHours = 2) => {
+    const d = new Date(at + offsetHours * 3_600_000);
+    const zone = offsetHours === 0 ? 'UTC' : `UTC${offsetHours > 0 ? '+' : '-'}${Math.abs(offsetHours)}`;
+    return `${DAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}, ${d.getUTCHours() % 12 || 12}:${String(d.getUTCMinutes()).padStart(2, '0')} ${d.getUTCHours() < 12 ? 'AM' : 'PM'} (${zone})`;
+  },
+  // `at` is the prompt's stamp; without one the prompt has none, as about a fifth of real transcripts do.
+  user: (text: string, at?: number) => ({ role: 'user', message: { content: [{ type: 'text', text: `${at === undefined ? '' : `<timestamp>${cu.stamp(at)}</timestamp>\n`}<user_query>\n${text}\n</user_query>` }] } }),
+  say: (text: string, tools: object[] = []) => ({ role: 'assistant', message: { content: [...(text === '' ? [] : [{ type: 'text', text }]), ...tools] } }),
+  tool: (name: string, input: object) => ({ type: 'tool_use', name, input }),
+  end: (status: 'success' | 'error' | 'aborted' = 'success', error?: string) => ({ type: 'turn_ended', status, ...(error === undefined ? {} : { error }) }),
+};
+
+export const cursorSlug = (folder: string) => folder.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+
+// The file's mtime is `mtimeMs`, which is the only time a transcript's last turn has. `trusted` (the default) writes the
+// marker the CLI leaves in a project it was allowed to run in, which names the folder; without it the folder has to
+// exist on disk to be found. `cli` gives the chat the folder the CLI keeps for one it can resume. `flat` writes the
+// older layout, and `filler` pads the file with about that many bytes after the first line. Returns the file path.
+export function writeCursorSession(
+  h: FakeHome,
+  o: { id: string; cwd: string; lines: object[]; mtimeMs: number; trusted?: boolean; cli?: boolean; flat?: boolean; filler?: number },
+): string {
+  const project = path.join(h.cursor, 'projects', cursorSlug(o.cwd));
+  const file = path.join(project, 'agent-transcripts', ...(o.flat ? [] : [o.id]), `${o.id}.jsonl`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (o.trusted !== false) {
+    fs.writeFileSync(path.join(project, '.workspace-trusted'), JSON.stringify({ trustedAt: iso(o.mtimeMs), workspacePath: o.cwd, trustMethod: 'cli-flag' }, null, 2));
+  }
+  if (o.cli) fs.mkdirSync(path.join(h.cursor, 'chats', 'd41d8cd98f00b204e9800998ecf8427e', o.id), { recursive: true });
+  const lines = [...o.lines];
+  const pad: object[] = [];
+  for (let bytes = 0; bytes < (o.filler ?? 0); ) {
+    const line = cu.say('', [cu.tool('Read', { path: PAD_TEXT })]);
+    pad.push(line);
+    bytes += JSON.stringify(line).length + 1;
+  }
+  lines.splice(1, 0, ...pad);
+  fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  fs.utimesSync(file, new Date(o.mtimeMs), new Date(o.mtimeMs));
   return file;
 }
