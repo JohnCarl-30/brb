@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { loadAllSessions, readSessionFile, resolveRoots } from '../../src/adapters/index';
-import { cl, cx, gm, kr, makeFakeHome, writeClaudeSession, writeCodexSession, writeGeminiSession, writeKiroSession } from '../support/fake-home';
+import { cl, cu, cx, gm, kr, makeFakeHome, writeClaudeSession, writeCodexSession, writeCursorSession, writeGeminiSession, writeKiroSession } from '../support/fake-home';
 import type { FakeHome } from '../support/fake-home';
 
 const NOW = Date.UTC(2026, 10, 5, 15, 0, 0);
@@ -18,12 +18,17 @@ const fakeHome = () => {
 afterEach(() => {
   for (const h of homes.splice(0)) fs.rmSync(h.home, { recursive: true, force: true });
 });
-const roots = (h: FakeHome) => ({ claude: h.claude, codex: h.codex, gemini: h.gemini, kiro: h.kiro, brb: h.brb });
+const roots = (h: FakeHome) => ({ claude: h.claude, codex: h.codex, gemini: h.gemini, kiro: h.kiro, cursor: h.cursor, cursorChats: path.join(h.cursor, 'chats'), brb: h.brb });
 
 test('resolveRoots defaults to folders under home, and the env overrides win', () => {
-  expect(resolveRoots({ HOME: '/h' })).toEqual({ claude: '/h/.claude', codex: '/h/.codex', gemini: '/h/.gemini', kiro: '/h/.kiro', brb: '/h/.brb' });
+  const cursor = { cursor: '/h/.cursor', cursorChats: '/h/.cursor/chats' };
+  expect(resolveRoots({ HOME: '/h' })).toEqual({ claude: '/h/.claude', codex: '/h/.codex', gemini: '/h/.gemini', kiro: '/h/.kiro', ...cursor, brb: '/h/.brb' });
   expect(resolveRoots({ HOME: '/h', CLAUDE_CONFIG_DIR: '/c', CODEX_HOME: '/x', BRB_HOME: '/b' }))
-    .toEqual({ claude: '/c', codex: '/x', gemini: '/h/.gemini', kiro: '/h/.kiro', brb: '/b' });
+    .toEqual({ claude: '/c', codex: '/x', gemini: '/h/.gemini', kiro: '/h/.kiro', ...cursor, brb: '/b' });
+  // Cursor keeps transcripts under its data folder and the CLI's chats under its config folder, each with a variable
+  // of its own. A blank one counts as unset, and XDG_CONFIG_HOME moves the config folder when CURSOR_CONFIG_DIR is unset.
+  expect(resolveRoots({ HOME: '/h', CURSOR_DATA_DIR: '/d', CURSOR_CONFIG_DIR: '/k', XDG_CONFIG_HOME: '/xdg' })).toMatchObject({ cursor: '/d', cursorChats: '/k/chats' });
+  expect(resolveRoots({ HOME: '/h', CURSOR_DATA_DIR: ' ', CURSOR_CONFIG_DIR: '', XDG_CONFIG_HOME: '/xdg' })).toMatchObject({ cursor: '/h/.cursor', cursorChats: '/xdg/cursor/chats' });
   // Gemini CLI's variable names the folder that holds .gemini, and an empty one counts as unset, as it does for the CLI.
   expect(resolveRoots({ HOME: '/h', GEMINI_CLI_HOME: '/g' }).gemini).toBe('/g/.gemini');
   expect(resolveRoots({ HOME: '/h', GEMINI_CLI_HOME: '' }).gemini).toBe('/h/.gemini');
@@ -39,8 +44,9 @@ test('loads the sessions of every tool', async () => {
   writeCodexSession(h, { id: 'x1', lines: [cx.meta('x1', '/w/b', min(6)), cx.user('add a rate limiter', min(6))] });
   writeGeminiSession(h, { id: 'g-1', projectRoot: '/w/c', messages: [gm.user('fix RSS dates', min(7))] });
   writeKiroSession(h, { id: 'k-1', cwd: '/w/d', lines: [kr.user('fix cart totals', min(8))] });
+  writeCursorSession(h, { id: 'u-1', cwd: '/w/e', mtimeMs: min(9), lines: [cu.user('fix the footer', min(9))] });
   const { sessions, warnings } = await loadAllSessions(roots(h), NOW);
-  expect(sessions.map((s) => `${s.tool}:${s.id}`).sort()).toEqual(['claude:c1', 'codex:x1', 'gemini:g-1', 'kiro:k-1']);
+  expect(sessions.map((s) => `${s.tool}:${s.id}`).sort()).toEqual(['claude:c1', 'codex:x1', 'cursor:u-1', 'gemini:g-1', 'kiro:k-1']);
   expect(warnings).toEqual([]);
 });
 

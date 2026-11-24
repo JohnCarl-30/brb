@@ -140,6 +140,18 @@ test.each([
   expect(buildCatchUp(input({ sessions: [s] })).elsewhere[0].resume).toBe(resume);
 });
 
+// A chat from Cursor's CLI resumes there. One from the app can only be opened, like Kiro's, since no shell command resumes it.
+test('a Cursor chat resumes in the CLI when the CLI ran it, and otherwise opens the project in the app', () => {
+  const chat = (id: string, cwd: string, ide?: boolean) => session({ id, tool: 'cursor', cwd, events: [user(30), agent(20, 'Done.'), turnEnd(20)], ...(ide ? { ide } : {}) });
+  const c = buildCatchUp(input({ sessions: [chat('u-cli', SHOP), chat('u-app', SHOP, true), chat('u-far', BLOG), chat('u-far-app', BLOG, true)] }));
+  expect(Object.fromEntries([...c.here!.rows, ...c.elsewhere].map((r) => [r.sessionId, r.resume]))).toEqual({
+    'u-cli': 'cursor-agent --resume u-cli',
+    'u-app': 'cursor .',
+    'u-far': 'cd ~/code/blog && cursor-agent --resume u-far',
+    'u-far-app': 'cd ~/code/blog && cursor .',
+  });
+});
+
 test('quotes a session id and a branch that the shell would read as commands', () => {
   const s = session({ id: 'x; rm -rf ~', tool: 'codex', cwd: SHOP, branch: 'a;b', events: [user(10), agent(5, 'Done.'), turnEnd(5)] });
   const c = buildCatchUp(input({ sessions: [s] }));

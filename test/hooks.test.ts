@@ -61,7 +61,7 @@ test('session-start hook says "1 other session" and leaves out the waiting count
   const home = path.join(tmp, 'one');
   const cwd = path.join(home, 'proj');
   fs.mkdirSync(cwd, { recursive: true });
-  const h = { home, claude: path.join(home, '.claude'), codex: path.join(home, '.codex'), gemini: path.join(home, '.gemini'), kiro: path.join(home, '.kiro'), brb: path.join(home, '.brb') };
+  const h = { home, claude: path.join(home, '.claude'), codex: path.join(home, '.codex'), gemini: path.join(home, '.gemini'), kiro: path.join(home, '.kiro'), cursor: path.join(home, '.cursor'), brb: path.join(home, '.brb') };
   writeClaudeSession(h, { id: 'old-one', cwd, lines: [cl.user('add a test', NOW - 30 * 60_000), cl.say('Added a test.', NOW - 29 * 60_000)] });
 
   const { stdout } = await hook('session-start', JSON.stringify({ session_id: 'new-session', cwd }), home);
@@ -92,7 +92,7 @@ test("hooks stay quiet inside brb's own AI calls", async () => {
 // brb can only see a permission prompt through the hooks, so it tips the plugin until a hook has run once.
 test('the plugin tip shows for a quiet Claude tool call until any hook has run', async () => {
   const w = seedScenario(path.join(tmp, 'tip'), NOW);
-  const h = { home: w.home, claude: path.join(w.home, '.claude'), codex: path.join(w.home, '.codex'), gemini: path.join(w.home, '.gemini'), kiro: path.join(w.home, '.kiro'), brb: path.join(w.home, '.brb') };
+  const h = { home: w.home, claude: path.join(w.home, '.claude'), codex: path.join(w.home, '.codex'), gemini: path.join(w.home, '.gemini'), kiro: path.join(w.home, '.kiro'), cursor: path.join(w.home, '.cursor'), brb: path.join(w.home, '.brb') };
   const min = (m: number) => NOW - m * 60_000;
   const list = async () => (await run({ argv: [], env: { HOME: w.home }, cwd: w.repo, now: NOW, isTTY: false })).stdout;
 
@@ -138,7 +138,7 @@ test('the Codex permission hook cuts a long command and writes nothing without a
 
 test('a Codex session that asks for approval shows as waiting on you, with what it asked', async () => {
   const w = seedScenario(path.join(tmp, 'codex-wait'), NOW);
-  const h = { home: w.home, claude: path.join(w.home, '.claude'), codex: path.join(w.home, '.codex'), gemini: path.join(w.home, '.gemini'), kiro: path.join(w.home, '.kiro'), brb: path.join(w.home, '.brb') };
+  const h = { home: w.home, claude: path.join(w.home, '.claude'), codex: path.join(w.home, '.codex'), gemini: path.join(w.home, '.gemini'), kiro: path.join(w.home, '.kiro'), cursor: path.join(w.home, '.cursor'), brb: path.join(w.home, '.brb') };
   const id = '019b1111-0000-7000-8000-00000000000a';
   const min = (m: number) => NOW - m * 60_000;
   writeCodexSession(h, { id, threadName: 'run the migration', lines: [cx.meta(id, w.repo, min(4)), cx.started(min(4)), cx.user('run the migration', min(4)), cx.say('Running it now.', min(3))] });
@@ -217,7 +217,7 @@ test('the Gemini notification hook writes nothing for another kind of notificati
 test('a Gemini session that stopped to ask reads as waiting on you', async () => {
   const w = seedScenario(path.join(tmp, 'gemini-wait'), NOW);
   const id = 'c0ffee00-0000-4000-8000-000000000009';
-  const h = { home: w.home, claude: path.join(w.home, '.claude'), codex: path.join(w.home, '.codex'), gemini: path.join(w.home, '.gemini'), kiro: path.join(w.home, '.kiro'), brb: path.join(w.home, '.brb') };
+  const h = { home: w.home, claude: path.join(w.home, '.claude'), codex: path.join(w.home, '.codex'), gemini: path.join(w.home, '.gemini'), kiro: path.join(w.home, '.kiro'), cursor: path.join(w.home, '.cursor'), brb: path.join(w.home, '.brb') };
   writeGeminiSession(h, { id, projectRoot: w.repo, jsonl: true, messages: [gm.user('migrate the database', NOW - 30_000), gm.say('I will run the migration.', NOW - 20_000)] });
   const row = async () => {
     const { stdout } = await run({ argv: ['--json'], env: { HOME: w.home }, cwd: w.repo, now: NOW, isTTY: false });

@@ -479,9 +479,170 @@ async function readCodexSessions(root, o) {
   return sessions.filter((s) => s !== null);
 }
 
+// src/adapters/cursor.ts
+import { readdir as readdir2, stat as stat2 } from "fs/promises";
+import { basename as basename4, dirname, isAbsolute as isAbsolute2, join as join4, resolve as resolve2 } from "path";
+var EDIT_TOOLS2 = /* @__PURE__ */ new Set(["Write", "StrReplace", "Delete", "EditNotebook", "MultiEdit", "Edit"]);
+var FILE_FIELDS = ["path", "file_path", "target_notebook", "target_file"];
+var QUESTION_TOOL = "AskQuestion";
+var PLAN_TOOL = "CreatePlan";
+var STAMP = /<timestamp>([\s\S]*?)<\/timestamp>/;
+var STAMP_PARTS = /([A-Za-z]{3})[a-z]* (\d{1,2}), (\d{4}),? (\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?\s*\(UTC(?:([+-])(\d{1,2})(?::?(\d{2}))?)?\)/i;
+var MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+var QUERY = /<user_query>\s*([\s\S]*?)\s*<\/user_query>/;
+function promptTime(text) {
+  const m = STAMP_PARTS.exec(STAMP.exec(text)?.[1] ?? "");
+  const month = MONTHS.indexOf(m?.[1].toLowerCase() ?? "");
+  if (!m || month === -1) return void 0;
+  const hour = m[7] ? Number(m[4]) % 12 + (m[7].toUpperCase() === "PM" ? 12 : 0) : Number(m[4]);
+  const offsetMinutes = (m[8] === "-" ? -1 : 1) * (Number(m[9] ?? 0) * 60 + Number(m[10] ?? 0));
+  const at = Date.UTC(Number(m[3]), month, Number(m[2]), hour, Number(m[5]), Number(m[6] ?? 0)) - offsetMinutes * 6e4;
+  return Number.isNaN(at) ? void 0 : at;
+}
+function promptText(text) {
+  const rest = text.replace(STAMP, "");
+  return (QUERY.exec(rest)?.[1] ?? rest.replace(/<\/?user_query>/g, "")).trim();
+}
+var saidText = (text) => text.split("\n").filter((line) => line.trim() !== "[REDACTED]").join("\n").trim();
+function addToolUse(t, block, at) {
+  const name = str(block?.name);
+  const input = typeof block?.input === "object" && block.input !== null ? block.input : {};
+  if (name === void 0) return;
+  if (name === "Shell") {
+    const command = str(input.command);
+    if (command?.trim()) t.events.push({ kind: "command", at, command, ok: true, output: "" });
+  } else if (EDIT_TOOLS2.has(name)) {
+    const file = FILE_FIELDS.map((field) => str(input[field])).find((f) => f !== void 0);
+    if (file) t.events.push({ kind: "edit", at, files: [resolve2(t.cwd, file)] });
+  } else if (name === QUESTION_TOOL) {
+    const question = str(input.questions?.[0]?.prompt) ?? str(input.title) ?? "has a question for you";
+    t.ask = { kind: "ask", at, reason: "question", text: oneLine(question, ERROR_MAX) };
+  } else if (name === PLAN_TOOL) {
+    t.ask = { kind: "ask", at, reason: "plan", text: "" };
+  }
+}
+function addLine3(t, line, inTail) {
+  t.ask = void 0;
+  if (line.type === "turn_ended") {
+    const at = t.clock ?? t.started;
+    if (line.status === "success") {
+      if (t.events.at(-1)?.kind !== "turn-end") t.events.push({ kind: "turn-end", at });
+    } else if (line.status === "aborted") {
+      t.events.push({ kind: "error", at, text: "interrupted" });
+    } else if (line.status === "error") {
+      t.events.push({ kind: "error", at, text: oneLine(str(line.error) ?? "", ERROR_MAX) || "Cursor stopped with an error" });
+    }
+    return;
+  }
+  const blocks = Array.isArray(line.message?.content) ? line.message.content : [];
+  const text = textOf(blocks.filter((b) => b?.type === "text"));
+  if (line.role === "user") {
+    const stamped = promptTime(text);
+    t.clock = stamped === void 0 ? t.clock ?? t.started : Math.min(t.changed, Math.max(t.clock ?? -Infinity, stamped));
+    const asked = promptText(text);
+    if (asked !== "") t.events.push({ kind: "user", at: t.clock, text: asked });
+    if (inTail) t.humanPromptInTail = true;
+  } else if (line.role === "assistant") {
+    const at = t.clock ?? t.started;
+    const said = saidText(text);
+    if (said !== "") t.events.push({ kind: "agent", at, text: said });
+    const calls = blocks.filter((b) => b?.type === "tool_use");
+    for (const call of calls) addToolUse(t, call, at);
+    if (said !== "" && calls.length === 0) t.events.push({ kind: "turn-end", at });
+  }
+}
+async function readSession3(file, cwd, whole = false) {
+  let times;
+  try {
+    times = await stat2(file.path);
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+  const changed = times.mtimeMs;
+  const started = times.birthtimeMs > 0 && times.birthtimeMs <= changed ? times.birthtimeMs : changed;
+  const { lines, tailStart } = whole ? { lines: (await readText(file.path) ?? "").split("\n"), tailStart: null } : await readHeadTail(file.path);
+  const t = { cwd, events: [], clock: void 0, started, changed, ask: void 0, humanPromptInTail: false };
+  const headLines = tailStart === null ? lines : lines.slice(0, tailStart);
+  for (const line of parseJsonLines(headLines)) addLine3(t, line, false);
+  if (tailStart !== null) for (const line of parseJsonLines(lines.slice(tailStart))) addLine3(t, line, true);
+  if (t.ask) t.events.push(t.ask);
+  const lastPrompt = t.events.map((e) => e.kind).lastIndexOf("user");
+  for (const event of t.events.slice(lastPrompt + 1)) event.at = changed;
+  const firstPrompt = t.events.find((e) => e.kind === "user");
+  const session = {
+    tool: "cursor",
+    id: basename4(file.path, ".jsonl"),
+    cwd,
+    title: oneLine(firstPrompt?.kind === "user" ? firstPrompt.text : "", TITLE_MAX) || "untitled session",
+    events: t.events,
+    lastActivityAt: changed,
+    file: file.path
+  };
+  if (tailStart !== null && !t.humanPromptInTail) session.partialTurn = true;
+  return session;
+}
+var slugOf = (name) => name.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+async function findFolder(dir, slug) {
+  let entries;
+  try {
+    entries = await readdir2(dir, { withFileTypes: true });
+  } catch {
+    return void 0;
+  }
+  const fits = entries.filter((entry) => entry.isDirectory() || entry.isSymbolicLink()).map((entry) => ({ path: join4(dir, entry.name), part: slugOf(entry.name) })).filter(({ part }) => part !== "" && (slug === part || slug.startsWith(`${part}-`))).sort((a, b) => b.part.length - a.part.length);
+  for (const { path: path10, part } of fits) {
+    if (slug !== part) {
+      const found = await findFolder(path10, slug.slice(part.length + 1));
+      if (found) return found;
+    } else if ((await stat2(path10).catch(() => null))?.isDirectory()) {
+      return path10;
+    }
+  }
+  return void 0;
+}
+async function workspaceOf(project) {
+  try {
+    const trusted = str(JSON.parse(await readText(join4(project, ".workspace-trusted")) ?? "")?.workspacePath);
+    if (trusted && isAbsolute2(trusted)) return trusted;
+  } catch {
+  }
+  return findFolder("/", basename4(project));
+}
+async function cliChatIds(chats) {
+  const ids = /* @__PURE__ */ new Set();
+  for (const project of await listFolder(chats).catch(() => [])) {
+    if (!project.isDirectory()) continue;
+    for (const chat of await listFolder(join4(chats, project.name)).catch(() => [])) ids.add(chat.name);
+  }
+  return ids;
+}
+async function readProject(project, sinceMs, cliChats) {
+  const folder = join4(project, "agent-transcripts");
+  const files = (await recentFiles(folder, /\.jsonl$/, sinceMs, 2)).filter((file) => dirname(file.path) === folder || basename4(dirname(file.path)) === basename4(file.path, ".jsonl"));
+  if (files.length === 0) return [];
+  const cwd = await workspaceOf(project);
+  if (cwd === void 0 || isBackgroundCwd(cwd)) return [];
+  const resumable = await cliChats();
+  const newest = /* @__PURE__ */ new Map();
+  for (const s of await Promise.all(files.map((file) => readSession3(file, cwd)))) {
+    if (s === null || s.lastActivityAt < (newest.get(s.id)?.lastActivityAt ?? -Infinity)) continue;
+    if (!resumable.has(s.id)) s.ide = true;
+    newest.set(s.id, s);
+  }
+  return [...newest.values()];
+}
+async function readCursorSessions(root, chats, o) {
+  const projects = (await listFolder(join4(root, "projects"))).filter((entry) => entry.isDirectory());
+  let ids;
+  const cliChats = () => ids ??= cliChatIds(chats);
+  const sessions = await Promise.all(projects.map((entry) => readProject(join4(root, "projects", entry.name), o.sinceMs, cliChats)));
+  return sessions.flat();
+}
+
 // src/adapters/gemini.ts
-import { join as join4, resolve as resolve2 } from "path";
-var EDIT_TOOLS2 = /* @__PURE__ */ new Set(["replace", "write_file", "edit"]);
+import { join as join5, resolve as resolve3 } from "path";
+var EDIT_TOOLS3 = /* @__PURE__ */ new Set(["replace", "write_file", "edit"]);
 var timeOf = (stamp) => typeof stamp === "string" ? Date.parse(stamp) : NaN;
 var INJECTED = /^(?:\s*<(hook_context|session_context)>[\s\S]*?<\/\1>)+\s*/;
 var SHELL_META = /^(Exit Code|Process Group PGID|Background PIDs): /;
@@ -515,9 +676,9 @@ function addToolCall(events, call, cwd, messageAt) {
       const { exitFailed, output } = readShellResult(call.result);
       events.push({ kind: "command", at, command, ok: call.status === "success" && !exitFailed, output });
     }
-  } else if (EDIT_TOOLS2.has(name) && call.status === "success") {
+  } else if (EDIT_TOOLS3.has(name) && call.status === "success") {
     const file = str(call.args?.file_path);
-    if (file) events.push({ kind: "edit", at, files: [resolve2(cwd, file)] });
+    if (file) events.push({ kind: "edit", at, files: [resolve3(cwd, file)] });
   }
 }
 function addMessage(events, message, cwd) {
@@ -577,7 +738,7 @@ function replayLines(text) {
   }
   return { sessionId, messages: [...messages.values()] };
 }
-async function readSession3(file, cwd) {
+async function readSession4(file, cwd) {
   const text = await readText(file.path);
   if (text === null) return null;
   let chat;
@@ -606,12 +767,12 @@ async function readSession3(file, cwd) {
     file: file.path
   };
 }
-async function readProject(folder, sinceMs) {
-  const files = await recentFiles(join4(folder, "chats"), /^session-.*\.jsonl?$/, sinceMs, 1);
+async function readProject2(folder, sinceMs) {
+  const files = await recentFiles(join5(folder, "chats"), /^session-.*\.jsonl?$/, sinceMs, 1);
   if (files.length === 0) return [];
-  const cwd = (await readText(join4(folder, ".project_root")))?.trim();
+  const cwd = (await readText(join5(folder, ".project_root")))?.trim();
   if (!cwd || isBackgroundCwd(cwd)) return [];
-  const sessions = await Promise.all(files.map((file) => readSession3(file, cwd)));
+  const sessions = await Promise.all(files.map((file) => readSession4(file, cwd)));
   const newest = /* @__PURE__ */ new Map();
   for (const s of sessions) {
     if (s !== null && s.lastActivityAt >= (newest.get(s.id)?.lastActivityAt ?? -Infinity)) newest.set(s.id, s);
@@ -619,14 +780,14 @@ async function readProject(folder, sinceMs) {
   return [...newest.values()];
 }
 async function readGeminiSessions(root, o) {
-  const tmp = join4(root, "tmp");
+  const tmp = join5(root, "tmp");
   const folders = (await listFolder(tmp)).filter((entry) => entry.isDirectory());
-  const sessions = await Promise.all(folders.map((entry) => readProject(join4(tmp, entry.name), o.sinceMs)));
+  const sessions = await Promise.all(folders.map((entry) => readProject2(join5(tmp, entry.name), o.sinceMs)));
   return sessions.flat();
 }
 
 // src/adapters/kiro.ts
-import { dirname, isAbsolute as isAbsolute2, join as join5, resolve as resolve3 } from "path";
+import { dirname as dirname2, isAbsolute as isAbsolute3, join as join6, resolve as resolve4 } from "path";
 var COMMAND_TOOLS = /* @__PURE__ */ new Set(["execute_bash", "runCommand", "executeBash"]);
 var EDIT_KINDS = /* @__PURE__ */ new Set(["edit", "delete", "move"]);
 var INTERRUPTED = /* @__PURE__ */ new Set(["cancelled", "aborted"]);
@@ -634,7 +795,7 @@ var isRecord2 = (value) => typeof value === "object" && value !== null && !Array
 function filesOf(call, cwd) {
   const a = call.args;
   const named = [call.filePath, a.path, a.file, a.targetFile, a.sourcePath, a.destinationPath].map(str).filter((f) => f !== void 0);
-  return [...new Set(named.map((f) => resolve3(cwd, f)))].filter(isAbsolute2);
+  return [...new Set(named.map((f) => resolve4(cwd, f)))].filter(isAbsolute3);
 }
 function addResult(t, p, at) {
   const call = t.calls.get(p.toolCallId);
@@ -648,7 +809,7 @@ function addResult(t, p, at) {
     if (files.length > 0) t.events.push({ kind: "edit", at, files });
   }
 }
-function addLine3(t, line, inTail) {
+function addLine4(t, line, inTail) {
   const p = line.payload;
   const at = typeof line.timestamp === "string" ? Date.parse(line.timestamp) : NaN;
   if (!isRecord2(p) || Number.isNaN(at)) return;
@@ -682,8 +843,8 @@ function addLine3(t, line, inTail) {
       break;
   }
 }
-async function readSession4(file, whole = false) {
-  const meta = await readText(join5(dirname(file.path), "session.json"));
+async function readSession5(file, whole = false) {
+  const meta = await readText(join6(dirname2(file.path), "session.json"));
   let info;
   try {
     info = JSON.parse(meta ?? "");
@@ -696,8 +857,8 @@ async function readSession4(file, whole = false) {
   const { lines, tailStart } = whole ? { lines: (await readText(file.path) ?? "").split("\n"), tailStart: null } : await readHeadTail(file.path);
   const t = { cwd, events: [], calls: /* @__PURE__ */ new Map(), pending: /* @__PURE__ */ new Map(), humanPromptInTail: false };
   const headLines = tailStart === null ? lines : lines.slice(0, tailStart);
-  for (const line of parseJsonLines(headLines)) addLine3(t, line, false);
-  if (tailStart !== null) for (const line of parseJsonLines(lines.slice(tailStart))) addLine3(t, line, true);
+  for (const line of parseJsonLines(headLines)) addLine4(t, line, false);
+  if (tailStart !== null) for (const line of parseJsonLines(lines.slice(tailStart))) addLine4(t, line, true);
   for (const { at, text } of t.pending.values()) t.events.push({ kind: "ask", at, reason: "question", text });
   t.events.sort((a, b) => a.at - b.at);
   const firstPrompt = t.events.find((e) => e.kind === "user");
@@ -714,12 +875,13 @@ async function readSession4(file, whole = false) {
   return session;
 }
 async function readKiroSessions(root, o) {
-  const files = await recentFiles(join5(root, "sessions"), /^messages\.jsonl$/, o.sinceMs, 3);
-  const sessions = await Promise.all(files.map((file) => readSession4(file)));
+  const files = await recentFiles(join6(root, "sessions"), /^messages\.jsonl$/, o.sinceMs, 3);
+  const sessions = await Promise.all(files.map((file) => readSession5(file)));
   return sessions.filter((s) => s !== null);
 }
 
 // src/adapters/index.ts
+var set = (value) => value?.trim() ? value : void 0;
 function resolveRoots(env) {
   const home = env.HOME ?? os.homedir();
   return {
@@ -728,17 +890,21 @@ function resolveRoots(env) {
     gemini: path.join(env.GEMINI_CLI_HOME || home, ".gemini"),
     // GEMINI_CLI_HOME stands in for the home folder, not for ~/.gemini
     kiro: path.join(home, ".kiro"),
+    // Cursor's app and CLI write transcripts under its data folder, and the CLI keeps its chats under its config folder.
+    cursor: set(env.CURSOR_DATA_DIR) ?? path.join(home, ".cursor"),
+    cursorChats: path.join(set(env.CURSOR_CONFIG_DIR) ?? (set(env.XDG_CONFIG_HOME) ? path.join(env.XDG_CONFIG_HOME, "cursor") : path.join(home, ".cursor")), "chats"),
     brb: env.BRB_HOME ?? path.join(home, ".brb")
   };
 }
 var TOOLS = [
-  { label: "Claude Code", read: readClaudeSessions, root: (r) => r.claude },
-  { label: "Codex", read: readCodexSessions, root: (r) => r.codex },
-  { label: "Gemini CLI", read: readGeminiSessions, root: (r) => r.gemini },
-  { label: "Kiro", read: readKiroSessions, root: (r) => r.kiro }
+  { label: "Claude Code", read: (r, o) => readClaudeSessions(r.claude, o) },
+  { label: "Codex", read: (r, o) => readCodexSessions(r.codex, o) },
+  { label: "Gemini CLI", read: (r, o) => readGeminiSessions(r.gemini, o) },
+  { label: "Kiro", read: (r, o) => readKiroSessions(r.kiro, o) },
+  { label: "Cursor", read: (r, o) => readCursorSessions(r.cursor, r.cursorChats, o) }
 ];
 async function loadAllSessions(roots, now) {
-  const results = await Promise.allSettled(TOOLS.map((t) => t.read(t.root(roots), { now, sinceMs: now - SCAN_MS })));
+  const results = await Promise.allSettled(TOOLS.map((t) => t.read(roots, { now, sinceMs: now - SCAN_MS })));
   const sessions = [];
   const warnings = [];
   results.forEach((result, i) => {
@@ -755,8 +921,9 @@ function readSessionFile(tool, file, cwd) {
   const recent = { path: file, mtimeMs: 0 };
   if (tool === "claude") return readSession(recent, true);
   if (tool === "codex") return readSession2(recent, /* @__PURE__ */ new Map());
-  if (tool === "kiro") return readSession4(recent, true);
-  return readSession3(recent, cwd);
+  if (tool === "kiro") return readSession5(recent, true);
+  if (tool === "cursor") return readSession3(recent, cwd, true);
+  return readSession4(recent, cwd);
 }
 
 // src/compute.ts
@@ -963,7 +1130,7 @@ function markSeen(brbHome, key, now) {
 }
 
 // src/catchup.ts
-var TOOL_NAME = { claude: "Claude", codex: "Codex", gemini: "Gemini", kiro: "Kiro" };
+var TOOL_NAME = { claude: "Claude", codex: "Codex", gemini: "Gemini", kiro: "Kiro", cursor: "Cursor" };
 var FIRST_RUN_MS = 8 * 60 * 6e4;
 var MAX_FILES = 5;
 var MAX_NEXT = 3;
@@ -976,8 +1143,10 @@ var RESUME = {
   claude: (id) => `claude --resume ${quote(id)}`,
   codex: (id) => `codex resume ${quote(id)}`,
   gemini: (id) => `gemini --resume ${quote(id)}`,
-  kiro: () => "kiro ."
+  kiro: () => "kiro .",
   // Kiro is an IDE: this opens the project, not the chat itself
+  // A chat from Cursor's CLI resumes in it. One from the app can only be opened there, like Kiro's.
+  cursor: (id, s) => s.ide ? "cursor ." : `cursor-agent --resume ${quote(id)}`
 };
 var inside = (dir, p) => p.startsWith(dir + path4.sep);
 var tilde = (p, home) => p === home || inside(home, p) ? `~${p.slice(home.length)}` : p;
@@ -1014,7 +1183,7 @@ function buildCatchUp(input) {
   const seenHere = lastSeen.get(hereProject.key) ?? lastUserAnywhere;
   const awayMs = input.sinceMs !== void 0 || seenHere === void 0 ? null : now - seenHere;
   const hereFolders = new Set([input.cwd, ...git2 ? [git2.root] : []].map(realpath));
-  const resumeFor = (s) => (hereFolders.has(realpath(s.cwd)) ? "" : `cd ${quotePath(tilde(s.cwd, home))} && `) + RESUME[s.tool](s.id);
+  const resumeFor = (s) => (hereFolders.has(realpath(s.cwd)) ? "" : `cd ${quotePath(tilde(s.cwd, home))} && `) + RESUME[s.tool](s.id, s);
   let maybeBlocked = false;
   const rows = sessions.flatMap((s) => {
     const project = projectFor(s.cwd);
@@ -1111,15 +1280,15 @@ function readGit(cwd) {
   const changes = [];
   for (const { file, untracked } of files) {
     const abs = path5.join(root, file);
-    let stat2;
+    let stat3;
     try {
-      stat2 = fs3.statSync(abs);
+      stat3 = fs3.statSync(abs);
     } catch {
       continue;
     }
-    if (!stat2.isFile()) continue;
-    const [added, removed] = hasHead && !untracked ? counts.get(file) ?? [0, 0] : [stat2.size > MAX_SCAN_BYTES ? 0 : countLines(abs), 0];
-    changes.push({ file, added, removed, mtimeMs: stat2.mtimeMs });
+    if (!stat3.isFile()) continue;
+    const [added, removed] = hasHead && !untracked ? counts.get(file) ?? [0, 0] : [stat3.size > MAX_SCAN_BYTES ? 0 : countLines(abs), 0];
+    changes.push({ file, added, removed, mtimeMs: stat3.mtimeMs });
   }
   changes.sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : 0);
   return { root, branch, changes };
@@ -1293,7 +1462,7 @@ function renderTerminal(c, o) {
   };
   const sections = [];
   if (c.sessions === 0) {
-    sections.push([" brb found no AI sessions from the last 7 days.", " Supported: Claude Code, Codex CLI, Gemini CLI, Kiro."]);
+    sections.push([" brb found no AI sessions from the last 7 days.", " Supported: Claude Code, Codex CLI, Gemini CLI, Kiro, Cursor."]);
   } else {
     const away = c.awayMs === null ? "" : ` \xB7 away ${formatAge(c.awayMs)}`;
     const moved = rows === 0 ? "nothing moved" : `${plural(rows, "thing", "things")} moved`;
@@ -1460,7 +1629,7 @@ var TIMEOUT_MS2 = 2e4;
 var SUMMARY_WIDTH = 60;
 var QUOTES = /^["'`“”‘’]+|["'`“”‘’]+$/g;
 function commandFor(tool, prompt) {
-  if (tool === "kiro") return null;
+  if (tool === "kiro" || tool === "cursor") return null;
   if (tool === "claude") return { bin: "claude", args: ["-p", "--model", "haiku", "--no-session-persistence", "--setting-sources", "", "--tools", "", "--strict-mcp-config", prompt] };
   if (tool === "codex") return { bin: "codex", args: ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", prompt] };
   return { bin: "gemini", args: ["-p", prompt, "--approval-mode", "plan"] };
@@ -1529,9 +1698,9 @@ function writeCache(file, cache2, fresh) {
   } catch {
   }
 }
-var defaultRunner = (bin, args, o) => new Promise((resolve6) => {
+var defaultRunner = (bin, args, o) => new Promise((resolve7) => {
   const child = execFile(bin, args, { cwd: o.cwd, env: o.env, timeout: o.timeoutMs, maxBuffer: 1024 * 1024, signal: o.signal }, (err, stdout) => {
-    resolve6({ code: err === null ? 0 : typeof err.code === "number" ? err.code : 1, stdout });
+    resolve7({ code: err === null ? 0 : typeof err.code === "number" ? err.code : 1, stdout });
   });
   child.stdin?.on("error", () => {
   });
@@ -1725,7 +1894,7 @@ Usage: brb [options]
   -v, --version    print the version
   -h, --help       show this help
 
-brb reads your local Claude Code, Codex, Gemini CLI and Kiro history. No API key.
+brb reads your local Claude Code, Codex, Gemini CLI, Kiro and Cursor history. No API key.
 With OPENCRAWL_API_URL and OPENCRAWL_TOKEN set, it also lists new OpenCrawl board posts.
 `;
 var fail = (message) => ({ stdout: `brb: ${message}
