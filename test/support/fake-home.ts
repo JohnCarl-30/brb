@@ -123,6 +123,8 @@ export function writeCodexSession(h: FakeHome, o: { id: string; lines: object[];
 // The project's path is in <gemini>/tmp/<project folder>/.project_root. A chat is one JSON document that the CLI
 // rewrites whole as the conversation goes on, with every message in `messages`. The shapes were count-checked on
 // 2026-11-06 against the owner's older chats (field names and labels only, no content read).
+// A newer CLI (0.71) writes the same chat as `.jsonl`: a first line with the session's own fields, then one line per
+// message or per `$rewindTo`, `$patch` or `$set` record. That shape is from the CLI's own reader, not from a live chat.
 
 export const gm = {
   user: (text: string, at: number) => ({ id: `m${at}`, timestamp: iso(at), type: 'user', content: [{ text }] }),
@@ -139,8 +141,9 @@ export const gm = {
 // The project folder is named after the last segment of `projectRoot`, so two roots that end alike share a folder.
 // The chat file is named by the first message's time, in UTC so the name doesn't depend on the machine's time zone;
 // two chats that start in the same minute need ids that differ in their first 8 characters. The file's mtime is
-// `mtimeMs`, or else the newest timestamp. Returns the chat file's path.
-export function writeGeminiSession(h: FakeHome, o: { id: string; projectRoot: string; messages: object[]; mtimeMs?: number }): string {
+// `mtimeMs`, or else the newest timestamp. With `jsonl` the chat is written the newer way, and `messages` are its
+// lines after the first: messages, and any `$` records among them. Returns the chat file's path.
+export function writeGeminiSession(h: FakeHome, o: { id: string; projectRoot: string; messages: object[]; mtimeMs?: number; jsonl?: boolean }): string {
   const times = o.messages.map(timestampOf).filter((t): t is number => t !== undefined && !Number.isNaN(t));
   const newest = times.length > 0 ? Math.max(...times) : undefined;
   const mtime = o.mtimeMs ?? newest;
@@ -150,9 +153,9 @@ export function writeGeminiSession(h: FakeHome, o: { id: string; projectRoot: st
   fs.mkdirSync(path.join(dir, 'chats'), { recursive: true });
   fs.writeFileSync(path.join(dir, '.project_root'), o.projectRoot);
 
-  const chat = { sessionId: o.id, projectHash: 'test', startTime, lastUpdated: iso(newest ?? mtime ?? 0), kind: 'main', messages: o.messages };
-  const file = path.join(dir, 'chats', `session-${startTime.slice(0, 16).replace(':', '-')}-${o.id.slice(0, 8)}.json`);
-  fs.writeFileSync(file, JSON.stringify(chat, null, 2));
+  const head = { sessionId: o.id, projectHash: 'test', startTime, lastUpdated: iso(newest ?? mtime ?? 0), kind: 'main' };
+  const file = path.join(dir, 'chats', `session-${startTime.slice(0, 16).replace(':', '-')}-${o.id.slice(0, 8)}.json${o.jsonl ? 'l' : ''}`);
+  fs.writeFileSync(file, o.jsonl ? [head, ...o.messages].map((line) => JSON.stringify(line) + '\n').join('') : JSON.stringify({ ...head, messages: o.messages }, null, 2));
   if (mtime !== undefined) fs.utimesSync(file, new Date(mtime), new Date(mtime));
   return file;
 }

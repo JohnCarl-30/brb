@@ -24,6 +24,9 @@ test('resolveRoots defaults to folders under home, and the env overrides win', (
   expect(resolveRoots({ HOME: '/h' })).toEqual({ claude: '/h/.claude', codex: '/h/.codex', gemini: '/h/.gemini', kiro: '/h/.kiro', brb: '/h/.brb' });
   expect(resolveRoots({ HOME: '/h', CLAUDE_CONFIG_DIR: '/c', CODEX_HOME: '/x', BRB_HOME: '/b' }))
     .toEqual({ claude: '/c', codex: '/x', gemini: '/h/.gemini', kiro: '/h/.kiro', brb: '/b' });
+  // Gemini CLI's variable names the folder that holds .gemini, and an empty one counts as unset, as it does for the CLI.
+  expect(resolveRoots({ HOME: '/h', GEMINI_CLI_HOME: '/g' }).gemini).toBe('/g/.gemini');
+  expect(resolveRoots({ HOME: '/h', GEMINI_CLI_HOME: '' }).gemini).toBe('/h/.gemini');
 });
 
 test('missing tools are silent', async () => {

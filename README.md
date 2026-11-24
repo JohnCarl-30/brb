@@ -134,7 +134,9 @@ Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus C
 | Kiro | `~/.kiro/sessions` | Questions and permission prompts |
 | Cursor | Planned ([#11](https://github.com/JohnCarl-30/brb/issues/11)) | |
 
-If you moved a tool's folder, brb follows the same variable the tool does: `CLAUDE_CONFIG_DIR` for Claude Code and `CODEX_HOME` for Codex. Gemini CLI and Kiro have no such variable, so brb always reads `~/.gemini` and `~/.kiro`.
+If you moved a tool's folder, brb follows the same variable the tool does: `CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for Codex and `GEMINI_CLI_HOME` for Gemini CLI. Kiro has no such variable, so brb always reads `~/.kiro`.
+
+brb reads both ways Gemini CLI has saved chats: one `.json` file per chat in older versions, and one `.jsonl` file per chat in newer ones.
 
 brb leaves out sessions that background agents run by themselves: its own summary runs, and the observer sessions of the [claude-mem](https://github.com/thedotmack/claude-mem) plugin.
 
@@ -267,6 +269,7 @@ With OPENCRAWL_API_URL and OPENCRAWL_TOKEN set, it also lists new OpenCrawl boar
 | `BRB_HOME` | Where brb keeps its own files. Default `~/.brb`. |
 | `CLAUDE_CONFIG_DIR` | Where Claude Code keeps its history. Default `~/.claude`. |
 | `CODEX_HOME` | Where Codex keeps its history. Default `~/.codex`. |
+| `GEMINI_CLI_HOME` | The folder that holds Gemini CLI's `.gemini` folder. Default your home folder. |
 | `OPENCRAWL_API_URL`, `OPENCRAWL_TOKEN` | Turn on the [OpenCrawl board](#opencrawl-board) section. Both are needed. |
 
 ### JSON
@@ -322,7 +325,7 @@ Limits: files an agent changes through a shell command (Claude's Bash, Codex's s
 
 ## Troubleshooting
 
-**"brb found no AI sessions from the last 7 days."** brb only reads sessions from the last week. If a tool keeps its history somewhere else, set `CLAUDE_CONFIG_DIR` or `CODEX_HOME` the same way you set it for the tool.
+**"brb found no AI sessions from the last 7 days."** brb only reads sessions from the last week. If a tool keeps its history somewhere else, set `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `GEMINI_CLI_HOME` the same way you set it for the tool.
 
 **"nothing moved".** Nothing changed since your last message in this project, or you already picked everything that did. Use `--since 1d` to look further back.
 

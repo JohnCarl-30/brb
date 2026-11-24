@@ -483,6 +483,7 @@ async function readCodexSessions(root, o) {
 import { join as join4, resolve as resolve2 } from "path";
 var EDIT_TOOLS2 = /* @__PURE__ */ new Set(["replace", "write_file", "edit"]);
 var timeOf = (stamp) => typeof stamp === "string" ? Date.parse(stamp) : NaN;
+var INJECTED = /^(?:\s*<(hook_context|session_context)>[\s\S]*?<\/\1>)+\s*/;
 var SHELL_META = /^(Exit Code|Process Group PGID|Background PIDs): /;
 var EXIT_CODE = /^Exit Code: (-?\d+)$/m;
 function readShellResult(result) {
@@ -523,7 +524,7 @@ function addMessage(events, message, cwd) {
   const at = timeOf(message?.timestamp);
   if (Number.isNaN(at)) return;
   if (message.type === "user") {
-    const text = textOf(message.content);
+    const text = textOf(message.content).replace(INJECTED, "");
     if (text.trim() !== "") events.push({ kind: "user", at, text });
   } else if (message.type === "gemini") {
     const calls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
@@ -535,14 +536,59 @@ function addMessage(events, message, cwd) {
     events.push({ kind: "error", at, text: oneLine(textOf(message.content), ERROR_MAX) || "error" });
   }
 }
+var isObject = (value) => typeof value === "object" && value !== null;
+var listOf = (value) => Array.isArray(value) ? value : [];
+function replayLines(text) {
+  let sessionId;
+  const messages = /* @__PURE__ */ new Map();
+  const addAll = (list2) => {
+    for (const message of listOf(list2)) if (typeof message?.id === "string") messages.set(message.id, message);
+  };
+  const patch = (change) => {
+    const message = messages.get(change?.id);
+    if (!message) return;
+    if (change.content !== void 0) message.content = change.content;
+    for (const callChange of listOf(change.toolCalls)) {
+      const call = listOf(message.toolCalls).find((c) => c?.id === callChange?.id);
+      if (call && isObject(callChange) && "result" in callChange) call.result = callChange.result;
+    }
+  };
+  for (const record of parseJsonLines(text.split("\n"))) {
+    if (typeof record.$rewindTo === "string") {
+      const ids = [...messages.keys()];
+      const from = ids.indexOf(record.$rewindTo);
+      for (const id of from === -1 ? ids : ids.slice(from)) messages.delete(id);
+    } else if (isObject(record.$patch)) {
+      patch(record.$patch);
+      for (const change of listOf(record.$patch.updates)) patch(change);
+      for (const id of listOf(record.$patch.removeIds)) messages.delete(id);
+    } else if (typeof record.id === "string") {
+      messages.set(record.id, record);
+    } else if (isObject(record.$set)) {
+      if (Array.isArray(record.$set.messages)) {
+        messages.clear();
+        addAll(record.$set.messages);
+      }
+      sessionId = str(record.$set.sessionId) ?? sessionId;
+    } else if (typeof record.sessionId === "string") {
+      sessionId = record.sessionId;
+      addAll(record.messages);
+    }
+  }
+  return { sessionId, messages: [...messages.values()] };
+}
 async function readSession3(file, cwd) {
   const text = await readText(file.path);
   if (text === null) return null;
   let chat;
-  try {
-    chat = JSON.parse(text);
-  } catch {
-    return null;
+  if (file.path.endsWith(".jsonl")) {
+    chat = replayLines(text);
+  } else {
+    try {
+      chat = JSON.parse(text);
+    } catch {
+      return null;
+    }
   }
   const id = str(chat?.sessionId);
   if (id === void 0) return null;
@@ -561,12 +607,16 @@ async function readSession3(file, cwd) {
   };
 }
 async function readProject(folder, sinceMs) {
-  const files = await recentFiles(join4(folder, "chats"), /^session-.*\.json$/, sinceMs, 1);
+  const files = await recentFiles(join4(folder, "chats"), /^session-.*\.jsonl?$/, sinceMs, 1);
   if (files.length === 0) return [];
   const cwd = (await readText(join4(folder, ".project_root")))?.trim();
   if (!cwd || isBackgroundCwd(cwd)) return [];
   const sessions = await Promise.all(files.map((file) => readSession3(file, cwd)));
-  return sessions.filter((s) => s !== null);
+  const newest = /* @__PURE__ */ new Map();
+  for (const s of sessions) {
+    if (s !== null && s.lastActivityAt >= (newest.get(s.id)?.lastActivityAt ?? -Infinity)) newest.set(s.id, s);
+  }
+  return [...newest.values()];
 }
 async function readGeminiSessions(root, o) {
   const tmp = join4(root, "tmp");
@@ -675,8 +725,8 @@ function resolveRoots(env) {
   return {
     claude: env.CLAUDE_CONFIG_DIR ?? path.join(home, ".claude"),
     codex: env.CODEX_HOME ?? path.join(home, ".codex"),
-    gemini: path.join(home, ".gemini"),
-    // Gemini CLI has no env override
+    gemini: path.join(env.GEMINI_CLI_HOME || home, ".gemini"),
+    // GEMINI_CLI_HOME stands in for the home folder, not for ~/.gemini
     kiro: path.join(home, ".kiro"),
     brb: env.BRB_HOME ?? path.join(home, ".brb")
   };

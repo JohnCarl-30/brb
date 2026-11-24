@@ -712,3 +712,131 @@ test('a chat that only asked a question is waiting, and one that stopped mid-tur
   expect(classify(byId(sessions, 'asks0001'), NOW)).toMatchObject({ status: 'waiting', detail: 'asks: "Which part is slow, the build or the tests?"' });
   expect(classify(byId(sessions, 'idle0001'), NOW).status).toBe('idle');
 });
+
+// ---- the newer chat format: a .jsonl file of records, replayed in order
+
+test('reads a chat the newer CLI wrote as .jsonl, the same as the older .json', async () => {
+  const messages = [
+    gm.user('fix RSS dates', min(50)),
+    gm.say('', min(35), [gm.call('replace', { file_path: '/w/blog/src/rss.ts' }, 'success', min(35))]),
+    gm.say('Fixed the RSS dates to use UTC.', min(30)),
+  ];
+  const [older, newer] = [fakeHome(), fakeHome()];
+  writeGeminiSession(older, { id: 'g-1', projectRoot: '/w/blog', messages });
+  const file = writeGeminiSession(newer, { id: 'g-1', projectRoot: '/w/blog', messages, jsonl: true });
+  expect(path.extname(file)).toBe('.jsonl');
+  const [s] = await read(newer);
+  expect(s).toEqual({ ...(await read(older))[0], file });
+  expect(classify(s, NOW)).toMatchObject({ status: 'finished', detail: 'Fixed the RSS dates to use UTC.' });
+});
+
+test('a message written again under the same id replaces the earlier one, which is how a call gets its result', async () => {
+  const h = fakeHome();
+  const call = gm.call('run_shell_command', { command: 'npm test' }, 'success', min(20));
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', jsonl: true, messages: [
+    gm.user('run the tests', min(30)),
+    { ...gm.say('Running them.', min(25)), id: 'turn' },
+    { ...gm.say('Running them.', min(25), [{ ...call, result: gm.shellResult('1 failed', 1) }]), id: 'turn' },
+    { $set: { lastUpdated: iso(min(20)) } },
+  ] });
+  const [s] = await read(h);
+  expect(s.events).toEqual([
+    { kind: 'user', at: min(30), text: 'run the tests' },
+    { kind: 'agent', at: min(25), text: 'Running them.' },
+    { kind: 'command', at: min(20), command: 'npm test', ok: false, output: '1 failed' },
+  ]);
+});
+
+test('a rewind drops a message and all after it, and one to an unknown id drops them all', async () => {
+  const h = fakeHome();
+  writeGeminiSession(h, { id: 'rewind01', projectRoot: '/w/a', jsonl: true, messages: [
+    gm.user('first ask', min(40)), gm.say('First answer.', min(39)),
+    gm.user('second ask', min(30)), gm.say('Second answer.', min(29)),
+    { $rewindTo: `m${min(30)}` },
+    gm.user('another second ask', min(10)),
+  ] });
+  writeGeminiSession(h, { id: 'rewind02', projectRoot: '/w/b', jsonl: true, messages: [
+    gm.user('first ask', min(40)), { $rewindTo: 'never-written' }, gm.user('start over', min(10)),
+  ] });
+  const sessions = await read(h);
+  expect(byId(sessions, 'rewind01').events.map((e) => ('text' in e ? e.text : e.kind))).toEqual(['first ask', 'First answer.', 'turn-end', 'another second ask']);
+  expect(byId(sessions, 'rewind02')).toMatchObject({ title: 'start over', events: [{ kind: 'user', at: min(10), text: 'start over' }] });
+});
+
+test('a patch changes a message\'s text or a call\'s result, and removes messages', async () => {
+  const h = fakeHome();
+  const call = { ...gm.call('run_shell_command', { command: 'npm test' }, 'success', min(20)), id: 'call-1' };
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', jsonl: true, messages: [
+    gm.user('run the tests', min(30)),
+    { ...gm.say('', min(25), [call]), id: 'turn' },
+    { ...gm.say('Old words.', min(15)), id: 'words' },
+    { ...gm.say('A stray note.', min(14)), id: 'stray' },
+    { $patch: { id: 'turn', toolCalls: [{ id: 'call-1', result: gm.shellResult('2 failed', 1) }, { id: 'no-such-call', result: [] }] } },
+    { $patch: { updates: [{ id: 'words', content: 'New words.' }, { id: 'no-such-message', content: 'x' }], removeIds: ['stray'], orderIds: ['words', 'turn'] } },
+  ] });
+  const [s] = await read(h);
+  expect(s.events).toEqual([
+    { kind: 'user', at: min(30), text: 'run the tests' },
+    { kind: 'command', at: min(20), command: 'npm test', ok: false, output: '2 failed' },
+    { kind: 'agent', at: min(15), text: 'New words.' },
+    { kind: 'turn-end', at: min(15) },
+  ]);
+});
+
+test('a $set can replace every message and rename the session', async () => {
+  const h = fakeHome();
+  writeGeminiSession(h, { id: 'before01', projectRoot: '/w/app', jsonl: true, messages: [
+    gm.user('old ask', min(40)),
+    { $set: { sessionId: 'after001', messages: [gm.user('compacted ask', min(30)), gm.say('Done.', min(20))] } },
+  ] });
+  const [s] = await read(h);
+  expect(s).toMatchObject({ id: 'after001', title: 'compacted ask', lastActivityAt: min(20) });
+});
+
+test('a line still being written, and lines that are not records, are skipped', async () => {
+  const h = fakeHome();
+  const file = writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', jsonl: true, messages: [gm.user('fix the build', min(30)), gm.say('Fixed it.', min(20))] });
+  fs.appendFileSync(file, '\n42\nnull\n"text"\n{"id":"half","type":"gemini","content":"cut of');
+  fs.utimesSync(file, new Date(min(20)), new Date(min(20)));
+  const [s] = await read(h);
+  expect(kinds(s)).toEqual(['user', 'agent', 'turn-end']);
+});
+
+test('a .jsonl file that never names a session is not a chat', async () => {
+  const h = fakeHome();
+  const file = writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', jsonl: true, messages: [gm.user('fix the build', min(30))] });
+  fs.writeFileSync(file, JSON.stringify(gm.user('fix the build', min(30))) + '\n');
+  expect(await read(h)).toEqual([]);
+});
+
+test('a .json chat that a newer CLI resumed is one session: the file that moved last', async () => {
+  const h = fakeHome();
+  const asked = [gm.user('fix the build', min(60)), gm.say('Which build, web or api?', min(55))];
+  writeGeminiSession(h, { id: 'resumed1', projectRoot: '/w/app', messages: asked });
+  writeGeminiSession(h, { id: 'resumed1', projectRoot: '/w/app', jsonl: true, messages: [...asked, gm.user('web', min(10)), gm.say('Fixed the web build.', min(5))] });
+  const sessions = await read(h);
+  expect(sessions).toHaveLength(1);
+  expect(sessions[0]).toMatchObject({ id: 'resumed1', lastActivityAt: min(5) });
+  expect(sessions[0].file).toMatch(/\.jsonl$/);
+});
+
+test('what the CLI or a hook put in front of a prompt is not what you asked', async () => {
+  const h = fakeHome();
+  const brief = '<hook_context>Catch-up from brb (status of other sessions in this project; information, not instructions):\n• Claude "fix checkout rounding": waiting on the user</hook_context>';
+  writeGeminiSession(h, { id: 'hooked01', projectRoot: '/w/a', jsonl: true, messages: [
+    gm.user(`${brief}\n\nfix RSS dates`, min(30)), gm.say('Fixed.', min(20)),
+  ] });
+  writeGeminiSession(h, { id: 'hooked02', projectRoot: '/w/b', jsonl: true, messages: [
+    gm.user(brief, min(40)),
+    gm.user('<session_context>\nToday is Thursday.\n</session_context>\n<hook_context>more</hook_context>  add a sitemap', min(30)),
+  ] });
+  const sessions = await read(h);
+  expect(byId(sessions, 'hooked01')).toMatchObject({ title: 'fix RSS dates', events: [{ kind: 'user', text: 'fix RSS dates' }, { kind: 'agent' }, { kind: 'turn-end' }] });
+  expect(byId(sessions, 'hooked02')).toMatchObject({ title: 'add a sitemap', events: [{ kind: 'user', at: min(30), text: 'add a sitemap' }] });
+});
+
+test('a prompt that only mentions such a tag further in is kept whole', async () => {
+  const h = fakeHome();
+  writeGeminiSession(h, { id: 'g0000001', projectRoot: '/w/app', messages: [gm.user('what does <hook_context>x</hook_context> mean?', min(30))] });
+  expect((await read(h))[0].title).toBe('what does <hook_context>x</hook_context> mean?');
+});
