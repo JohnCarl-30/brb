@@ -1308,6 +1308,16 @@ function scanWhole(root, file) {
     return [];
   }
 }
+var ESCAPED = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 };
+function unquote(quoted) {
+  const bytes = [];
+  for (const [, escape, plain] of quoted.matchAll(/\\([0-7]{3}|.)|([^\\]+)/gs)) {
+    if (plain !== void 0) bytes.push(...Buffer.from(plain));
+    else if (escape.length === 3) bytes.push(parseInt(escape, 8));
+    else bytes.push(ESCAPED[escape] ?? escape.charCodeAt(0));
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
 function patchTodos(patch) {
   const byFile = /* @__PURE__ */ new Map();
   let file = "";
@@ -1327,6 +1337,8 @@ function patchTodos(patch) {
       }
     } else if (text.startsWith("+++ b/")) {
       file = text.slice(6).replace(/\t$/, "");
+    } else if (text.startsWith('+++ "b/')) {
+      file = unquote(/^\+\+\+ "b\/(.*)"\t?$/.exec(text)?.[1] ?? "");
     }
   }
   return byFile;

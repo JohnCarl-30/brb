@@ -11,7 +11,6 @@ const MAX_SCAN_BYTES = 1_000_000;
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
 const TODO = /\b(?:TODO|FIXME)\b[:\s-]*(.*)$/;
 // Pinned so the owner's git config (colors, path prefixes, quoting, external diff tools) can't change what we parse.
-// shortcut: a path with a tab, quote, backslash or newline in its name is still quoted by git, so its TODOs are missed. Unquote if that ever matters.
 const PATCH = ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', 'HEAD', '-U0'];
 
 // Read-only: only rev-parse, status, diff and ls-files. Null when the command fails (not a repo, no HEAD yet, git missing).
@@ -106,6 +105,19 @@ function scanWhole(root: string, file: string): Todo[] {
   }
 }
 
+// A name that holds a quote, a backslash or a control character is quoted in a patch whatever the config says, the way
+// C writes a string: "b/tab\there.ts". An octal escape is one byte of the name, so the bytes are put back together.
+const ESCAPED: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 };
+function unquote(quoted: string): string {
+  const bytes: number[] = [];
+  for (const [, escape, plain] of quoted.matchAll(/\\([0-7]{3}|.)|([^\\]+)/gs)) {
+    if (plain !== undefined) bytes.push(...Buffer.from(plain));
+    else if (escape.length === 3) bytes.push(parseInt(escape, 8));
+    else bytes.push(ESCAPED[escape] ?? escape.charCodeAt(0)); // \" and \\ stand for themselves
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
 // Reads the added lines of a -U0 patch. Inside a hunk every line starts with +, - or \, so "diff --git", "@@" and "+++ " at the start of a line outside one are headers.
 function patchTodos(patch: string): Map<string, Todo[]> {
   const byFile = new Map<string, Todo[]>();
@@ -126,6 +138,8 @@ function patchTodos(patch: string): Map<string, Todo[]> {
       }
     } else if (text.startsWith('+++ b/')) {
       file = text.slice(6).replace(/\t$/, ''); // git adds a tab after a name with spaces
+    } else if (text.startsWith('+++ "b/')) {
+      file = unquote(/^\+\+\+ "b\/(.*)"\t?$/.exec(text)?.[1] ?? '');
     }
   }
   return byFile;

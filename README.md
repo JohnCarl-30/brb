@@ -122,7 +122,7 @@ export OPENCRAWL_TOKEN=<an OpenCrawl access token>
 
 ## Why not just `/recap`?
 
-Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus Codex, Gemini and your own edits.
+Claude Code's `/recap` knows one Claude session. `brb` knows all of them, plus Codex, Gemini, Kiro, Cursor and your own edits.
 
 ## Supported tools
 

@@ -161,6 +161,21 @@ test('finds TODOs in files whose names have spaces, brackets, colons and non-ASC
   expect(addedTodos(root, names)).toEqual(names.map((file) => ({ file, line: 2, text: 'later' })));
 });
 
+// git quotes these names in a patch whatever its config says. Windows allows none of them in a file name.
+test.skipIf(process.platform === 'win32')('finds TODOs in files whose names have a tab, a quote, a backslash, a newline or a control character', () => {
+  const root = newRepo();
+  const names = ['tab\there.ts', 'quo"te.ts', 'back\\slash.ts', 'new\nline.ts', 'ctl\x01x.ts', 'café "q" and space.ts', 'ends\\', '\\101 is not A.ts'];
+  for (const name of names) write(root, name, 'one\n');
+  commitAll(root);
+  for (const name of names) fs.appendFileSync(path.join(root, name), '// TODO: later\n');
+  write(root, 'new "one".ts', '// FIXME: untracked too\n');
+
+  expect(addedTodos(root, names)).toEqual(names.map((file) => ({ file, line: 2, text: 'later' })));
+  expect(addedTodos(root, ['new "one".ts'])).toEqual([{ file: 'new "one".ts', line: 1, text: 'untracked too' }]);
+  // The files themselves were already listed: status gives their names as they are.
+  expect(readGit(root)!.changes.map((c) => c.file).sort()).toEqual([...names, 'new "one".ts'].sort());
+});
+
 test('skips untracked files over 1 MB when looking for TODOs', () => {
   const root = newRepo();
   write(root, 'a.ts', 'one\n');
